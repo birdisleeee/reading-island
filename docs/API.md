@@ -26,6 +26,8 @@
 
 ## 格式边界
 
+AI设置另有：GET `/api/ai-settings`（无Key正文），POST `/api/ai-settings/test`（provider/api_url/model/api_key/name/system_prompt），PUT `/api/ai-settings`（相同字段+proof+revision）。只允许已登录读者访问，写入拒绝跨源；空api_key表示沿用本人已保存的Key。test使用小型合成内容调用所填服务，返回短时测试凭据；save校验当前配置及用户，未测试或更改配置返回409。测试会使用所填服务的余额，不自动重试。
+
 TXT/Markdown 规范换行；HTML 提取正文；DOCX/EPUB 解析无加密正文及章节，复杂文件可能退回原件模式。PDF、旧 DOC 和 Kindle 格式只保留原件，没有 OCR、DRM 解密或精准阅读承诺。
 
 偏移使用 UTF-16 code unit，范围不切开代理字符。R2 保存原始字节、冻结规范文本、摘要和分块清单，旧版本引用不随新上传重解释。

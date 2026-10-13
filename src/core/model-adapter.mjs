@@ -4,7 +4,7 @@ export function endpoint(value) {
   if(url.protocol!=='https:' || url.username || url.password || url.hash)throw new Error('Invalid AI endpoint');
   return url.href;
 }
-export async function runModel({env,payload,history=[],readSource,fetchImpl=fetch}) {
+export async function runModel({env,payload,history=[],readSource,fetchImpl=fetch,probe=false}) {
   const url=endpoint(env.MODEL_API_URL);
   if(!env.MODEL_API_KEY || !env.MODEL_NAME)throw new Error('Model is not configured');
   const context={book:payload.book,discussion:payload.discussion,excerpt:payload.source,source_available:Boolean(payload.source_link)};
@@ -15,8 +15,9 @@ export async function runModel({env,payload,history=[],readSource,fetchImpl=fetc
   const tools=payload.source_link?[{type:'function',function:{name:'read_source',description:'读取当前议题已授权的冻结原文范围；最多4000个字符。',parameters:{type:'object',properties:{start:{type:'integer',minimum:0},limit:{type:'integer',minimum:1,maximum:4000}},required:['start','limit'],additionalProperties:false}}}]:[];
   let calls=0;
   for(let step=0;step<5;step++) {
-    const response=await fetchImpl(url,{method:'POST',redirect:'error',signal:AbortSignal.timeout(60000),headers:{Authorization:`Bearer ${env.MODEL_API_KEY}`,'Content-Type':'application/json'},body:JSON.stringify({model:env.MODEL_NAME,messages,...(tools.length?{tools}:{}),stream:false})});
-    if(!response.ok)throw new Error('Model request failed');
+    let response;
+    try{response=await fetchImpl(url,{method:'POST',redirect:'manual',signal:AbortSignal.timeout(probe?30000:60000),headers:{Authorization:`Bearer ${env.MODEL_API_KEY}`,'Content-Type':'application/json'},body:JSON.stringify({model:env.MODEL_NAME,messages,...(tools.length?{tools}:{}),...(env.MODEL_PROVIDER==='deepseek'||new URL(url).hostname==='api.deepseek.com'?{thinking:{type:'disabled'}}:{}),...(probe?{max_tokens:256,tool_choice:step===0?{type:'function',function:{name:'read_source'}}:'none'}:{}),stream:false})});}catch{throw Object.assign(new Error('Model unreachable'),{code:'model_unreachable'});}
+    if(!response.ok)throw Object.assign(new Error('Model request failed'),{code:response.status===401||response.status===403?'model_auth_failed':response.status===402?'model_credit_failed':response.status===429?'model_rate_limited':'model_request_failed'});
     const data=await response.json(),message=data.choices?.[0]?.message;
     if(!message || typeof message!=='object')throw new Error('Invalid model response');
     if(!message.tool_calls?.length) {

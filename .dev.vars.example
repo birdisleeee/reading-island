@@ -1,7 +1,9 @@
 # Copy to .dev.vars for local development. Never reuse these example values online.
-READER_TOKEN=local-reading-password-change-before-deploy
-SESSION_SECRET=local-session-secret-change-before-deploy
-AI_SHARED_SECRET=local-agent-secret-change-before-deploy
+READER_TOKEN=
+SESSION_SECRET=
+# Fill two independent random values above; required for login and encrypted settings.
+# Optional, only for an existing Agent's webhook:
+# AI_SHARED_SECRET=your-independent-agent-secret
 # AI_MODE can be mock, model, or webhook. Mock never calls a model.
 # AI_MODE=model
 # MODEL_API_URL=https://your-provider.example/v1/chat/completions

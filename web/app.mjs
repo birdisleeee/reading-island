@@ -1,6 +1,8 @@
-import { syncIslandBadgeAppearance, readingConfig } from './badge-appearance.mjs';
+import { syncIslandBadgeAppearance, readingConfig,refreshReadingConfig } from './badge-appearance.mjs';
 import { ensureSession } from './session.mjs';
+import {openAISettings} from './ai-settings.mjs';
 await ensureSession();
+await refreshReadingConfig();
 import { groupDiscussionMessages } from './discussion-messages.mjs';
 import { renderMarkdown } from './markdown.mjs';
 import { createAnnotation, createBook, createThreadMessage, makeAnchor, makeDocument, openDatabase, readSnapshot, resolveAnnotation, saveSnapshot } from './model.mjs';
@@ -155,6 +157,11 @@ function render() {
   const previousView = app.dataset.view;
   const previousScroll = app.querySelector('.thread-scroll')?.scrollTop;
   if (view === 'shelf') app.innerHTML = shelfView(state.books, state.groups, shelfSearch, menuOpen);
+  if(view==='shelf'){
+    const entry=document.createElement('button');entry.type='button';entry.className='ai-setup-entry';entry.dataset.action='ai-settings';
+    entry.textContent=readingConfig.aiConfigured?`${readingConfig.aiName} · 已连接 · 设置`:'连接自己的 AI · 填 Key、测试并保存';
+    app.querySelector('.search-box').after(entry);
+  }
   if (view === 'group') app.innerHTML = groupView(state.books, groupName);
   if (view === 'journal') app.innerHTML = journalView(currentBook(), bookNotes(), state.threads, journalTab, currentDoc());
   if (view === 'reader') app.innerHTML = readerView();
@@ -334,6 +341,7 @@ document.addEventListener('click', async (event) => {
   }
   if (action === 'note-detail') { const note=findNote(control.dataset.note); if(note) modal('完整摘录', `<blockquote class="full-excerpt">${esc(note.anchor.exact)}</blockquote><p>${esc(note.insight || '')}</p>${btn('在原文查看','open-note','secondary',`data-note="${noteKey(note)}"`)}`,''); return; }
   if (action === 'back') { goBack(); return; }
+  if(action==='ai-settings'){await openAISettings(async()=>{await refreshReadingConfig();render();});return;}
   if (action === 'toggle-date' || action === 'date-month' || action === 'date-pick') {
     const field = control.closest('.date-field'), popup = field.querySelector('.date-popup'), input = field.querySelector('input');
     if (action === 'date-pick') {

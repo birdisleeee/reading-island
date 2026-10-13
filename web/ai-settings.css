@@ -1,0 +1,8 @@
+.ai-setup-entry{display:block;width:calc(100% - 36px);margin:8px 18px 0;padding:11px 14px;text-align:left;background:#e9dfcf;border:1px solid #d4c5b0;border-radius:12px;font-size:14px;color:var(--ink)}
+.ai-settings-dialog{border-radius:20px;width:min(calc(100% - 24px),560px);margin:auto;bottom:auto;max-height:92dvh}
+.ai-settings-dialog .dialog-body{max-height:calc(92dvh - 150px);padding:18px;line-height:1.6}
+.ai-settings-dialog select{padding:11px;font-size:16px;border:1px solid #d4c5b0;border-radius:10px;background:white;color:var(--ink)}
+.ai-settings-dialog input:read-only{background:#f2ece1}.ai-settings-dialog summary{cursor:pointer;font-size:14px;margin-bottom:12px}
+.ai-settings-status{padding:12px;border-radius:10px;background:#f1e8d8;font-size:14px;color:var(--ink)}
+.ai-test-note{margin-top:16px;line-height:1.6;font-size:12px}
+.ai-settings-dialog button:disabled{opacity:.5;cursor:wait}.ai-settings-dialog .dialog-actions{flex-wrap:wrap}

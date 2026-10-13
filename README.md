@@ -17,6 +17,14 @@ A reusable reading space for you and your own AI: books, chapters, excerpts, and
 
 ## 快速开始
 
+**只有 API Key 的使用者，从这里开始：[零基础部署与 DeepSeek 接入](docs/START-HERE.md)。**
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/birdisleeee/reading-island)
+
+流程：自己的 CF/GitHub 账户 → 开通自己的 R2 → 部署按钮 → 登录网站 → 选择 DeepSeek、填 Key → 测试成功 → 保存共读。无需先搭建 Agent。也可以把 [LLM 操作指引](docs/LLM-DEPLOY-GUIDE.md)交给自己的助手。官方按钮按此配置准备，尚未在新 CF 账户走完实机部署；浏览器接入流程已通过协议替身验收。
+
+下面是本地开发方式。
+
 需要 Node.js 22 或更新的 LTS 版本。默认 Mock 模式无需模型 key，也不会调用真实 AI。
 
 ```sh
@@ -25,7 +33,7 @@ cd reading-island
 npm ci
 ```
 
-将 `.dev.vars.example` 复制为 `.dev.vars`，然后：
+将 `.dev.vars.example` 复制为 `.dev.vars`，填写两个不同随机值 `READER_TOKEN` 和 `SESSION_SECRET`，然后：
 
 ```sh
 npm run dev
@@ -40,12 +48,16 @@ npm run dev
 | 接线 | 配置 | 状态 |
 | --- | --- | --- |
 | Mock | `AI_MODE=mock` | 完整本地共读流程已验证，无真实模型调用 |
-| 模型 API | `AI_MODE=model`，配置 URL、key 和模型名 | Chat Completions 文本与工具协议已用替身验证；各供应商需自行实测 |
+| 模型 API | 网页选择 DeepSeek/兼容接口，填 Key、测试并保存；也保留服务端配置方式 | 文字、工具、加密保存与真实 workerd 请求已用替身验证；真实账户需实测 |
 | 已有 Agent | `AI_MODE=webhook`，配置 HTTPS endpoint 和独立共享密钥 | HTTP 示例、签名和幂等已验证；将示例回复函数接到自己的 Agent |
 
 模型 key 只在后端使用。已有 Agent 继续管理自己的人格和长期记忆，共读模块仅提供独立议题会话与书籍内容接口。
 
+DeepSeek 的地址/模型预设按2026-10-13 [官方文档](https://api-docs.deepseek.com/)核对；无需复制模型Key到Cloudflare Secrets。网页保存的设置优先于本实例的模型环境变量，Key以AES-GCM加密存储，不回显、不写浏览器本地存储或Git。
+
 - [Cloudflare 部署](docs/DEPLOYMENT.md)
+- [零基础使用](docs/START-HERE.md)
+- [让自己的 LLM 协助部署](docs/LLM-DEPLOY-GUIDE.md)
 - [AI 接入与协议](docs/AI-INTEGRATION.md)
 - [嵌入已有网站及登录接线](docs/EMBEDDING.md)
 - [HTTP 接口与格式说明](docs/API.md)

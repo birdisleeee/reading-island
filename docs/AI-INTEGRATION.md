@@ -2,6 +2,14 @@
 
 共读数据由共读后端管理，AI 接入通过独立适配器完成。默认 Mock 用于验证页面与通信，不是真实模型。真实供应商/Agent 的兼容性需在使用者环境验证。
 
+## 只有API Key：网页接入
+
+书架点击“连接自己的AI”→选DeepSeek或兼容接口→填Key→测试→保存。DeepSeek地址和模型预填，高级项可改模型、称呼和共读风格。测试一般两次小型API请求，验证文字回复及强制原文工具调用；不发送私人书库。真实点击使用使用者自己的API余额。
+
+只有匹配当前配置/当前用户且未过期的成功测试凭据才允许保存。配置变化需重测，凭据10分钟过期，revision防止跨窗口覆盖。Key在本实例DO中加密存储；GET只返回has_key，重开设置留空沿用。已保存配置优先于环境变量。具体首次部署见[从零开始](START-HERE.md)。
+
+DeepSeek预设为官方Chat Completions完整地址和当前deepseek-flash模型，明确thinking disabled，适配当前文本工具循环。未提供思考模式历史reasoning_content持久化；不声明已支持该模式。说明与来源见[DeepSeek官方思考模式](https://api-docs.deepseek.com/guides/thinking_mode/)。
+
 ## 已有 Agent：HTTPS Webhook
 
 设置 `AI_MODE=webhook`、`AI_WEBHOOK_URL`、`PUBLIC_BASE_URL` 和独立 `AI_SHARED_SECRET`。每轮 POST 的协议为 `reading-turn-v1`，包括：

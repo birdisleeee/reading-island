@@ -1,13 +1,18 @@
 import { handleReadingApi, handleReadingGatewayApi } from './api.mjs';
 import { principalFor, sameSecret, issueToken } from '../core/auth.mjs';
 import { readJson, ReadingError } from './validation.mjs';
+import {handleAISettings,publicAISettings} from './ai-settings.mjs';
 export { ReadingLibraryDO } from './library-do.mjs';
 const json=(value,status=200,headers={})=>Response.json(value,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...headers}});
 export default {
   async fetch(request,env,ctx) {
     const url=new URL(request.url),path=url.pathname;
     try {
-      if(path==='/api/config')return json({aiName:env.AI_NAME||'阅读伙伴',aiMode:env.AI_MODE||'mock',apiOrigin:url.origin,returnUrl:'/',accent:env.THEME_ACCENT||'#6b4f8a',accentText:env.THEME_ACCENT_TEXT||'#ffffff'});
+      if(path==='/api/config'){
+        const principal=await principalFor(request,env),settings=principal&&env.READING_LIBRARY?await publicAISettings(env,principal.user_id):null;
+        return json({aiName:settings?.configured?settings.name:env.AI_NAME||'阅读伙伴',aiMode:settings?.configured?'model':env.AI_MODE||'mock',aiConfigured:Boolean(settings?.configured||env.AI_MODE==='webhook'||(env.MODEL_API_URL&&env.MODEL_API_KEY)),apiOrigin:url.origin,returnUrl:'/',accent:env.THEME_ACCENT||'#6b4f8a',accentText:env.THEME_ACCENT_TEXT||'#ffffff'});
+      }
+      if(path==='/api/ai-settings'||path==='/api/ai-settings/test')return handleAISettings(request,env,await principalFor(request,env));
       if(path==='/api/session') {
         if(request.method==='GET'){const principal=await principalFor(request,env);return principal?json(principal):json({error:'unauthorized'},401);}
         const origin=request.headers.get('origin');

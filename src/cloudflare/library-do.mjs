@@ -121,6 +121,12 @@ export class ReadingLibraryDO extends DurableObject {
   }
 
   async #execute(owner, operation, input) {
+    if(operation==='getAISettings')return this.#get('settings','ai',false);
+    if(operation==='putAISettings')return this.ctx.storage.transactionSync(()=>{
+      const old=this.#get('settings','ai',false);requireValue(input.revision===(old?.revision||0),'revision_conflict',409);
+      requireValue(typeof input.iv==='string'&&typeof input.cipher==='string'&&input.public&&typeof input.tested_at==='string');
+      return this.#put('settings','ai',{iv:input.iv,cipher:input.cipher,public:input.public,revision:(old?.revision||0)+1,tested_at:input.tested_at});
+    });
     if (operation === 'unread') {
       const threads = this.ctx.storage.sql.exec(`SELECT json_extract(m.value, '$.thread_id') AS thread_id, m.book_id, COUNT(*) AS count
         FROM reading_records m LEFT JOIN reading_records r

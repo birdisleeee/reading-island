@@ -1,6 +1,7 @@
 import { identity, ReadingError, requireValue, readBody } from './validation.mjs';
 import { hmacHex, equalHex, issueToken, verifyToken } from '../core/auth.mjs';
 import { runModel, endpoint } from '../core/model-adapter.mjs';
+import { effectiveAIEnv } from './ai-settings.mjs';
 
 export async function readVerifiedGatewayJson(request,env) {
   requireValue(env.AI_SHARED_SECRET,'gateway_not_configured',503);
@@ -29,20 +30,22 @@ export async function dispatchReadingTurn(env,stub,turnId,owner,origin,fetchImpl
   const prepared=await stub.call(owner,'prepareDispatch',{turn_id:turnId});
   if(!prepared.ok)return {status:'unavailable',reason:prepared.error,turn_id:turnId};
   const {payload,turn}=prepared.value;
-  const mode=env.AI_MODE || 'mock';
+  let mode=env.AI_MODE || 'mock';
   const claim=await stub.call(owner,'claimDispatch',{turn_id:turnId});
   if(!claim.ok || !claim.value.acquired)return {status:claim.value?.turn.status||'unavailable',duplicate:true,turn_id:turnId,delivery_id:turn.delivery_id};
-  if(mode==='webhook'&&(!env.AI_WEBHOOK_URL||!env.AI_SHARED_SECRET)) {
-    await stub.call(owner,'markDispatch',{turn_id:turnId,status:'unavailable',detail_code:'gateway_not_configured'});
-    return {status:'unavailable',reason:'gateway_not_configured',turn_id:turnId};
-  }
   try {
+    env=await effectiveAIEnv(env,owner);
+    mode=env.AI_MODE || 'mock';
+    if(mode==='webhook'&&(!env.AI_WEBHOOK_URL||!env.AI_SHARED_SECRET)) {
+      await stub.call(owner,'markDispatch',{turn_id:turnId,status:'unavailable',detail_code:'gateway_not_configured'});
+      return {status:'unavailable',reason:'gateway_not_configured',turn_id:turnId};
+    }
     if(mode==='webhook') {
       const base=new URL(env.PUBLIC_BASE_URL||origin);requireValue(base.protocol==='https:','invalid_callback_origin');
       const token=await issueToken(env.AI_SHARED_SECRET,{purpose:'source',user_id:owner,thread_id:payload.thread_id},3600);
       const envelope={...payload,owner_id:owner,session_id:`reading:${owner}:${payload.thread_id}`,callback_url:new URL('/api/reading/gateway/reply',base).href,source_access:{url:new URL('/api/reading/gateway/source',base).href,token}};
       const raw=JSON.stringify(envelope),timestamp=String(Math.floor(Date.now()/1000));
-      const response=await fetchImpl(endpoint(env.AI_WEBHOOK_URL),{method:'POST',redirect:'error',signal:AbortSignal.timeout(15000),headers:{'Content-Type':'application/json','X-Webhook-Timestamp':timestamp,'X-Webhook-Signature-V2':await hmacHex(env.AI_SHARED_SECRET,`${timestamp}.${raw}`),'X-Request-ID':turn.delivery_id},body:raw});
+      const response=await fetchImpl(endpoint(env.AI_WEBHOOK_URL),{method:'POST',redirect:'manual',signal:AbortSignal.timeout(15000),headers:{'Content-Type':'application/json','X-Webhook-Timestamp':timestamp,'X-Webhook-Signature-V2':await hmacHex(env.AI_SHARED_SECRET,`${timestamp}.${raw}`),'X-Request-ID':turn.delivery_id},body:raw});
       const body=await response.json();
       if(response.status!==202||body.status!=='accepted'||body.delivery_id!==turn.delivery_id)throw new Error('Agent did not accept turn');
       await stub.call(owner,'markDispatch',{turn_id:turnId,status:'accepted'});return {status:'accepted',turn_id:turnId,delivery_id:turn.delivery_id};

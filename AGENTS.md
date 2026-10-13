@@ -1,6 +1,6 @@
 # Reading Island contributor rules
 
-Read README.md, docs/API.md, docs/AI-INTEGRATION.md and docs/EMBEDDING.md before changing behaviour.
+Read README.md, docs/START-HERE.md, docs/API.md, docs/AI-INTEGRATION.md and docs/EMBEDDING.md before changing behaviour. Deployment changes also require docs/DEPLOYMENT.md and docs/LLM-DEPLOY-GUIDE.md.
 
 - This repository is maintained independently. Changes apply only here by default. Updating an external integration requires its maintainer's explicit request and separate validation/release.
 - Keep the reading UI and AI interfaces reusable. Cloudflare is the first reference backend, not a requirement for all future adapters.
