@@ -1,0 +1,33 @@
+# 共读 HTTP 接口
+
+参考后端统一前缀 `/api/reading/`。浏览器使用 HttpOnly 会话 Cookie；服务端可用已签名会话的 Bearer token。身份由后端验证，请求体里的 owner/user 字段不决定归属。修改请求拒绝跨源浏览器 Origin。
+
+| 请求 | 行为 |
+| --- | --- |
+| GET `/{groups,books,documents,annotations,threads,messages}` | 游标分页；`after`、`limit`（默认50/最多100），可筛选 `book_id`；messages 可筛选 `thread_id` |
+| GET `/{resource}/{id}` | 单条读取 |
+| POST `/{groups,books,annotations,threads}` | 创建，稳定 id 支持同请求幂等重试 |
+| PATCH `/books/{id}` | 修改资料，需要当前 revision |
+| PUT `/documents/{id}?book_id=...&filename=...` | 上传原始字节，最多25MiB；发布不可变文档版本 |
+| GET `/documents/{id}/{original,text}` | 原件或规范正文 |
+| GET `/documents/{id}/source?book_id=...&version=...&sha=...&start=...&limit=...` | 已登录读者范围读取，上限4000个UTF-16单位 |
+| POST `/annotations` | `annotation_id,book_id,document_id,start,end,exact,insight,purpose`；服务器回读验证 exact，purpose 可为 excerpt/discussion |
+| POST `/threads` | `thread_id,book_id,title,opening,opening_message_id,turn_id,delivery_id`，可附 annotation_id/document_id |
+| POST `/threads/{id}/messages` | `message_id,turn_id,delivery_id,text`，同一 turn 不重复建消息 |
+| POST `/threads/{id}/retry` | `turn_id`，重用原投递身份；模型失败终态不自动重生成 |
+| PATCH `/threads/{id}` | `status: open/closed` 和 revision；结束与重开保留历史 |
+| GET `/threads/{id}/context` | 当前书籍、议题、摘录和冻结原文引用 |
+| GET `/unread`；POST `/threads/{id}/read` | 未读摘要；read 使用已加载的 message_id |
+| PUT `/books/{id}/cover?revision=...` | 上传PNG/JPEG/WebP封面，最多8MiB |
+| PATCH `/documents/{id}/chapters` | revision 和章节范围 |
+| POST `/documents/{id}/progress` | `start` 阅读位置 |
+
+错误返回 `{ "error": "code" }`：401 未登录、403 无权限/跨源、404 不存在、409 版本/幂等/摘录冲突、413 超限、415 格式、503 未配置/暂不可用。修改时使用返回的 revision；冲突后刷新，不覆盖其他客户端修改。
+
+## 格式边界
+
+TXT/Markdown 规范换行；HTML 提取正文；DOCX/EPUB 解析无加密正文及章节，复杂文件可能退回原件模式。PDF、旧 DOC 和 Kindle 格式只保留原件，没有 OCR、DRM 解密或精准阅读承诺。
+
+偏移使用 UTF-16 code unit，范围不切开代理字符。R2 保存原始字节、冻结规范文本、摘要和分块清单，旧版本引用不随新上传重解释。
+
+独立元数据实现位于 `src/cloudflare/`。其他后端可以实现上述接口与身份/冻结/幂等语义，不要求使用相同数据库结构。

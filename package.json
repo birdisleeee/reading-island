@@ -1,0 +1,14 @@
+{
+  "name": "reading-island", "version": "0.1.0", "private": true, "type": "module", "license": "MIT",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "dev": "npm run build && wrangler dev --ip 127.0.0.1 --port 4187",
+    "deploy": "npm run build && wrangler deploy",
+    "test": "npm run build && node --test web/model.test.mjs web/markdown.test.mjs web/discussion-messages.test.mjs test/*.test.mjs",
+    "check": "node tools/check-release.mjs"
+  },
+  "dependencies": { "linkedom": "0.18.13" },
+  "devDependencies": { "esbuild": "0.28.2", "miniflare": "4.20260730.0", "wrangler": "4.150.0" },
+  "overrides": { "undici": "7.29.1", "sharp": "0.35.5" }
+}

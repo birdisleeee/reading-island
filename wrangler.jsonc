@@ -1,0 +1,10 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "reading-island", "main": "dist/worker.mjs", "compatibility_date": "2026-07-30",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": { "directory": "dist/assets", "binding": "ASSETS", "run_worker_first": ["/api/*", "/"] },
+  "durable_objects": { "bindings": [{ "name": "READING_LIBRARY", "class_name": "ReadingLibraryDO" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ReadingLibraryDO"] }],
+  "r2_buckets": [{ "binding": "BOOK_BUCKET", "bucket_name": "reading-island-books" }],
+  "vars": { "AI_MODE": "mock", "AI_NAME": "阅读伙伴", "DEFAULT_USER_ID": "reader" }
+}

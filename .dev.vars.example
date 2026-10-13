@@ -1,0 +1,11 @@
+# Copy to .dev.vars for local development. Never reuse these example values online.
+READER_TOKEN=local-reading-password-change-before-deploy
+SESSION_SECRET=local-session-secret-change-before-deploy
+AI_SHARED_SECRET=local-agent-secret-change-before-deploy
+# AI_MODE can be mock, model, or webhook. Mock never calls a model.
+# AI_MODE=model
+# MODEL_API_URL=https://your-provider.example/v1/chat/completions
+# MODEL_API_KEY=your-key
+# MODEL_NAME=your-model
+# AI_MODE=webhook
+# AI_WEBHOOK_URL=https://your-agent.example/reading/turn

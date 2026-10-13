@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+.env
+.env.*
+!.env.example
+docs/PREPARATION.md
+*.log
+playwright-report/
+test-results/
+.agent-data/
