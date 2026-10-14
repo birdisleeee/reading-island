@@ -3,6 +3,7 @@ import { ensureSession } from './session.mjs';
 import {openAISettings} from './ai-settings.mjs';
 await ensureSession();
 await refreshReadingConfig();
+await import('./desktop.mjs');
 import { groupDiscussionMessages } from './discussion-messages.mjs';
 import { renderMarkdown } from './markdown.mjs';
 import { createAnnotation, createBook, createThreadMessage, makeAnchor, makeDocument, openDatabase, readSnapshot, resolveAnnotation, saveSnapshot } from './model.mjs';
@@ -324,13 +325,13 @@ function highlightSearch(root, query) {
 
 document.addEventListener('click', async (event) => {
   if (event.target.closest('[data-close]')) { sheet.close(); return; }
-  if (menuOpen && !event.target.closest('.shelf-menu-wrap')) { menuOpen = false; render(); return; }
+  if (menuOpen && !event.target.closest('.shelf-menu-wrap')) { menuOpen = false; render(); if (!event.target.closest('.reading-desktop-rail')) return; }
   const marked = event.target.closest('mark[data-note]');
   if (marked && !window.getSelection()?.toString()) { const note=findNote(marked.dataset.note); if(note?.thread_id) openThread(note.thread_id); else if(note) modal('完整摘录', `<blockquote>${esc(note.anchor.exact)}</blockquote><p>${esc(note.insight || '')}</p>`,''); return; }
   const control = event.target.closest('[data-action]');
   if (!control) return;
   const action = control.dataset.action;
-  if (cloud && !['back','toggle-menu','open-group'].includes(action)) {
+  if (cloud && !['back','toggle-menu','open-group','open-shelf'].includes(action)) {
     control.setAttribute('aria-busy', 'true');
     try { await ensureLibraryDetails(); } catch (error) { toast(error.message); return; }
     finally { control.removeAttribute('aria-busy'); }
@@ -341,6 +342,7 @@ document.addEventListener('click', async (event) => {
   }
   if (action === 'note-detail') { const note=findNote(control.dataset.note); if(note) modal('完整摘录', `<blockquote class="full-excerpt">${esc(note.anchor.exact)}</blockquote><p>${esc(note.insight || '')}</p>${btn('在原文查看','open-note','secondary',`data-note="${noteKey(note)}"`)}`,''); return; }
   if (action === 'back') { goBack(); return; }
+  if (action === 'open-shelf') { menuOpen = false; navigate('shelf', {bookId:null}); render(); return; }
   if(action==='ai-settings'){await openAISettings(async()=>{await refreshReadingConfig();render();});return;}
   if (action === 'toggle-date' || action === 'date-month' || action === 'date-pick') {
     const field = control.closest('.date-field'), popup = field.querySelector('.date-popup'), input = field.querySelector('input');

@@ -14,6 +14,7 @@ A reusable reading space for you and your own AI: books, chapters, excerpts, and
 - 冻结原文版本；替换文档后，旧摘录继续引用旧版本。
 - AI 按需读取当前议题授权的原文范围，不默认把整本书发送给模型。
 - 接入自己的已有 Agent，或使用 Chat Completions 兼容模型 API。
+- 电脑端使用分类侧栏、宽幅阅读面板和书籍网格；搜索/标题/插图固定，书架独立滚动。插图可替换、取消或恢复默认，外观只保存在当前浏览器。
 
 ## 快速开始
 

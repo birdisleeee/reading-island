@@ -6,3 +6,7 @@
 .ai-settings-status{padding:12px;border-radius:10px;background:#f1e8d8;font-size:14px;color:var(--ink)}
 .ai-test-note{margin-top:16px;line-height:1.6;font-size:12px}
 .ai-settings-dialog button:disabled{opacity:.5;cursor:wait}.ai-settings-dialog .dialog-actions{flex-wrap:wrap}
+@media(min-width:641px){
+  .ai-setup-entry{display:none}
+  .reading-desktop-rail [data-desktop-ai]{font-size:14px;overflow-wrap:anywhere}
+}
