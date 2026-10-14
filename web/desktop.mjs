@@ -23,15 +23,8 @@ async function loadAppearance(){
   try{
     db=await openAppearanceDb();
     const tx=db.transaction('configs');
-    const [global,art]=await Promise.all([request(tx.objectStore('configs').get('global-style')),request(tx.objectStore('configs').get('desktop-reading-hero'))]);
+    const art=await request(tx.objectStore('configs').get('desktop-reading-hero'));
     if(run!==generation||!desktop.matches)return;
-    const v=global?.values||{},ink=/^#[0-9a-f]{6}$/i.test(v.pageTextColor||'')?v.pageTextColor:'#332b22';
-    root.style.setProperty('--desktop-reading-ink',ink);
-    root.style.setProperty('--desktop-reading-font',fonts[v.fontFamily]||fonts.serif);
-    const channels=ink.slice(1).match(/../g).map(x=>parseInt(x,16)/255);
-    const light=channels.reduce((n,x,i)=>n+x*[.2126,.7152,.0722][i],0)>.5;
-    root.style.setProperty('--desktop-reading-surface-rgb',light?'23,20,18':'255,253,249');
-    root.style.setProperty('--desktop-reading-on-accent',contrast(v.interfaceBackgroundColor||v.selfBubbleColor||readingConfig.accent||'#6b4f8a'));
     const next=art?.blob instanceof Blob?URL.createObjectURL(art.blob):'';
     if(imageUrl)URL.revokeObjectURL(imageUrl);imageUrl=next;
     schedule();
@@ -62,9 +55,6 @@ function refresh(){
   }
   rail.querySelector('[data-desktop-books]').setAttribute('aria-current',app.dataset.view==='shelf'?'page':'false');
   rail.querySelector('[data-action="all-notes"]').setAttribute('aria-current',app.dataset.view==='notes'?'page':'false');
-  const ai=rail.querySelector('[data-desktop-ai]');
-  const aiLabel=readingConfig.aiConfigured?`${readingConfig.aiName} · AI 设置`:'连接自己的 AI';
-  if(ai.textContent!==aiLabel)ai.textContent=aiLabel;
   const image=app.querySelector('.library-hero img');
   if(image){
     if(!image.dataset.desktopOriginalSrc)image.dataset.desktopOriginalSrc=image.getAttribute('src');
@@ -82,7 +72,7 @@ function ensureDesktop(){
   }
   if(!rail){
     rail=document.createElement('aside');rail.className='reading-desktop-rail';rail.setAttribute('aria-label','共读岛导航');
-    rail.innerHTML=`<div class="reading-desktop-brand">共读岛<small>READING ISLAND</small></div><nav><button type="button" data-desktop-books data-action="open-shelf">书架</button><button type="button" data-action="all-notes">全部札记</button></nav><div class="reading-desktop-group-heading">书籍分组</div><nav class="reading-desktop-groups"></nav><div class="reading-desktop-rail-foot"><button type="button" data-action="create-group">＋ 新建分组</button><button type="button" data-action="manage-groups">管理分组</button><button type="button" data-action="ai-settings" data-desktop-ai>连接自己的 AI</button><a href="${escape(readingConfig.returnUrl)}">‹ 返回首页</a></div>`;
+    rail.innerHTML=`<div class="reading-desktop-brand">共读岛<small>READING ISLAND</small></div><nav><button type="button" data-desktop-books data-action="open-shelf">书架</button><button type="button" data-action="all-notes">全部札记</button></nav><div class="reading-desktop-group-heading">书籍分组</div><nav class="reading-desktop-groups"></nav><div class="reading-desktop-rail-foot"><button type="button" data-action="create-group">＋ 新建分组</button><button type="button" data-action="settings" data-desktop-settings>设置</button><a href="${escape(readingConfig.returnUrl)}">‹ 返回首页</a></div>`;
     document.body.append(rail);
     dialog=document.createElement('dialog');dialog.className='reading-desktop-art-dialog';dialog.setAttribute('aria-labelledby','reading-art-title');
     dialog.innerHTML='<h2 id="reading-art-title">替换共读岛插图？</h2><p>选择新图片后，会替换书架上方的插图。图片仅用于当前电脑的外观。</p><div class="reading-art-actions"><button type="button" data-art="reset">恢复默认图片</button><button type="button" data-art="cancel">取消</button><button type="button" data-art="choose" class="primary">选择图片</button></div>';

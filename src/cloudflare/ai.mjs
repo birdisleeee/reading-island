@@ -34,7 +34,7 @@ export async function dispatchReadingTurn(env,stub,turnId,owner,origin,fetchImpl
   const claim=await stub.call(owner,'claimDispatch',{turn_id:turnId});
   if(!claim.ok || !claim.value.acquired)return {status:claim.value?.turn.status||'unavailable',duplicate:true,turn_id:turnId,delivery_id:turn.delivery_id};
   try {
-    env=await effectiveAIEnv(env,owner);
+    env=await effectiveAIEnv(env,owner,stub);
     mode=env.AI_MODE || 'mock';
     if(mode==='webhook'&&(!env.AI_WEBHOOK_URL||!env.AI_SHARED_SECRET)) {
       await stub.call(owner,'markDispatch',{turn_id:turnId,status:'unavailable',detail_code:'gateway_not_configured'});

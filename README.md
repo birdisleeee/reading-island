@@ -15,6 +15,7 @@ A reusable reading space for you and your own AI: books, chapters, excerpts, and
 - AI 按需读取当前议题授权的原文范围，不默认把整本书发送给模型。
 - 接入自己的已有 Agent，或使用 Chat Completions 兼容模型 API。
 - 电脑端使用分类侧栏、宽幅阅读面板和书籍网格；搜索/标题/插图固定，书架独立滚动。插图可替换、取消或恢复默认，外观只保存在当前浏览器。
+- 牛皮纸主题、美化设置、分类展开/收起、独立原文排版；AI 支持人物预设，后端可按日或按周定时发起书籍议题。
 
 ## 快速开始
 
@@ -60,6 +61,8 @@ DeepSeek 的地址/模型预设按2026-10-13 [官方文档](https://api-docs.dee
 - [零基础使用](docs/START-HERE.md)
 - [让自己的 LLM 协助部署](docs/LLM-DEPLOY-GUIDE.md)
 - [AI 接入与协议](docs/AI-INTEGRATION.md)
+- [设置、美化与阅读排版](docs/SETTINGS.md)
+- [定时共读议题](docs/TOPIC-SCHEDULE.md)
 - [嵌入已有网站及登录接线](docs/EMBEDDING.md)
 - [HTTP 接口与格式说明](docs/API.md)
 - [贡献指南](CONTRIBUTING.md)

@@ -13,7 +13,7 @@ function readingStatusLabel(value) {
   return value === 'reading' ? '阅读中' : value === 'finished' ? '已阅' : '未读';
 }
 
-export function shelfView(books, groups, query = '', menuOpen = false) {
+export function shelfView(books, groups, query = '', menuOpen = false,collapsed=new Set()) {
   const normalized = query.trim().toLowerCase();
   const visible = books.filter((book) => `${book.title}${book.author || ''}${book.category || ''}`.toLowerCase().includes(normalized));
   const categories = groups?.length ? groups : ['堆放'];
@@ -21,7 +21,7 @@ export function shelfView(books, groups, query = '', menuOpen = false) {
     <header class="shelf-top">${btn(icon('back'), 'back', 'icon-btn', 'aria-label="返回上一层"')}<h1>共读岛</h1><div class="shelf-menu-wrap">${btn(icon('menu'), 'toggle-menu', 'icon-btn', `aria-label="书架菜单" aria-expanded="${menuOpen}"`)}${menuOpen ? `<div class="shelf-menu"><button type="button" data-action="create-group">${icon('add')} 新建分组</button><button type="button" data-action="manage-groups">管理分组</button><button type="button" data-action="all-notes">全部札记</button></div>` : ''}</div></header>
     <label class="search-box">${icon('search')}<input id="shelf-search" value="${e(query)}" placeholder="搜索书籍内容……" aria-label="搜索书籍"></label>
     <div class="library-hero object-cluster"><img src="/reading-island/assets/reading-cluster.svg" alt="阅读物件"></div>
-    <div class="shelf-books" aria-label="分类书架">${categories.map((category) => { const group = visible.filter((book) => (book.category || '堆放') === category); return `<section class="shelf-section" data-group="${e(category)}"><header class="shelf-label"><h2>${e(category)}</h2>${btn('···', 'open-group', 'group-more', `data-group="${e(category)}" aria-label="查看${e(category)}完整书架"`)}</header><div class="book-grid book-strip">${group.map((book) => `<button class="book-tile" type="button" data-action="open-book" data-book="${book.book_id}">${bookCover(book)}<strong>${e(book.title)}</strong><small>${e(book.author || '作者待补')} · ${readingStatusLabel(book.reading_status)}</small></button>`).join('') || '<p class="group-empty">这里还没有书</p>'}</div></section>`; }).join('') || '<p class="empty-copy">没有找到这本书。</p>'}</div>
+    <div class="shelf-books" aria-label="分类书架">${categories.map((category) => { const group = visible.filter((book) => (book.category || '堆放') === category); return `<section class="shelf-section" data-group="${e(category)}"><header class="shelf-label"><h2>${btn(e(category), 'open-group', 'group-title', `data-group="${e(category)}"`)}</h2>${btn('<svg class="icon collapse-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>', 'toggle-group', 'group-more', `data-group="${e(category)}" aria-expanded="${!collapsed.has(category)}" aria-label="展开或收起${e(category)}"`)}</header><div class="book-grid book-strip" ${collapsed.has(category)?'hidden':''}>${group.map((book) => `<button class="book-tile" type="button" data-action="open-book" data-book="${book.book_id}">${bookCover(book)}<strong>${e(book.title)}</strong><small>${e(book.author || '作者待补')} · ${readingStatusLabel(book.reading_status)}</small></button>`).join('') || '<p class="group-empty">这里还没有书</p>'}</div></section>`; }).join('') || '<p class="empty-copy">没有找到这本书。</p>'}</div>
     ${btn(icon('add'), 'add-book', 'book-fab', 'aria-label="添加书籍"')}
   </section>`;
 }

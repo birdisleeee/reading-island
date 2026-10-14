@@ -12,17 +12,18 @@ const bytes=value=>Uint8Array.from(atob(value),char=>char.charCodeAt(0));
 async function encrypt(env,owner,value){const iv=crypto.getRandomValues(new Uint8Array(12));const cipher=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:encode.encode(owner)},await key(env),encode.encode(JSON.stringify(value)));return {iv:b64(iv),cipher:b64(cipher)};}
 async function decrypt(env,owner,stored){try{return JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:bytes(stored.iv),additionalData:encode.encode(owner)},await key(env),bytes(stored.cipher))));}catch{throw new ReadingError(503,'settings_key_unreadable');}}
 export async function publicAISettings(env,owner){const saved=await record(env,owner);return saved?{...saved.public,has_key:true,configured:true,revision:saved.revision,tested_at:saved.tested_at}:defaults();}
-export async function effectiveAIEnv(env,owner){const saved=await record(env,owner);if(!saved)return env;const value=await decrypt(env,owner,saved);return {...env,AI_MODE:'model',AI_NAME:value.name,MODEL_API_URL:value.api_url,MODEL_API_KEY:value.api_key,MODEL_NAME:value.model,MODEL_PROVIDER:value.provider,MODEL_SYSTEM_PROMPT:value.system_prompt};}
+export async function effectiveAIEnv(env,owner,stub){const result=stub?await stub.call(owner,'getAISettings'):null;const saved=result?.ok?result.value:await record(env,owner);if(!saved)return env;const value=await decrypt(env,owner,saved);return {...env,AI_MODE:'model',AI_NAME:value.name,MODEL_API_URL:value.api_url,MODEL_API_KEY:value.api_key,MODEL_NAME:value.model,MODEL_PROVIDER:value.provider,MODEL_SYSTEM_PROMPT:value.system_prompt,MODEL_PERSONA:value.persona||''};}
 function validateURL(value){const url=new URL(endpoint(value));requireValue(!url.search && !/^(localhost|.*\.(?:localhost|local|internal))$/i.test(url.hostname) && !/^[\d.]+$/.test(url.hostname) && !url.hostname.includes(':'),'invalid_ai_endpoint');return url.href;}
 async function normalize(env,owner,input){
   requireValue(['deepseek','compatible'].includes(input.provider),'invalid_provider');
   const api_url=input.provider==='deepseek'?DEEPSEEK.api_url:validateURL(String(input.api_url||''));
-  const model=String(input.model||'').trim(),name=String(input.name||'阅读伙伴').trim(),system_prompt=String(input.system_prompt||'');
+  const model=String(input.model||'').trim(),name=String(input.name||'阅读伙伴').trim(),system_prompt=String(input.system_prompt||''),persona=String(input.persona||'');
   requireValue(/^[a-zA-Z0-9_.:/-]{1,100}$/.test(model),'invalid_model');requireValue(name.length>0&&name.length<=60&&system_prompt.length<=4000,'invalid_input');
+  requireValue(persona.length<=12000,'persona_too_long');
   let api_key=String(input.api_key||'').trim();
   if(!api_key){const saved=await record(env,owner);requireValue(saved,'api_key_required');api_key=(await decrypt(env,owner,saved)).api_key;}
   requireValue(api_key.length>0&&api_key.length<=4096&&!/[\r\n]/.test(api_key),'invalid_api_key');
-  return {provider:input.provider,api_url,model,name,system_prompt,api_key};
+  return {provider:input.provider,api_url,model,name,system_prompt,persona,api_key};
 }
 async function fingerprint(value){return [...new Uint8Array(await crypto.subtle.digest('SHA-256',encode.encode(JSON.stringify(value))))].map(n=>n.toString(16).padStart(2,'0')).join('');}
 export async function probeAISettings(env,owner,input,fetchImpl=fetch){

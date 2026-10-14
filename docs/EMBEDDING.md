@@ -21,8 +21,10 @@ const token = await issueToken(sessionSecret, {
 
 ## 显示配置
 
-后端 `AI_NAME` 决定回复作者的显示名，`THEME_ACCENT`、`THEME_ACCENT_TEXT` 控制未读提示颜色。默认返回共读首页。若要返回宿主，修改 `/api/config` 的 `returnUrl`，只允许服务端白名单内的同源路径；不要接收用户提供的任意跳转 URL。
+后端 `AI_NAME` 决定回复作者的显示名，`THEME_ACCENT` 提供首次进入时的默认强调色。用户已保存的本地美化主题优先，并按对比度选取按钮前景色；`/api/config`仍提供 accent/accentText 供宿主使用。默认返回共读首页。若要返回宿主，修改 `/api/config` 的 `returnUrl`，只允许服务端白名单内的同源路径；不要接收用户提供的任意跳转 URL。
 
 电脑端（宽度641px起）使用分类侧栏和宽幅面板，主题强调色也用于侧栏选中态和按钮。手机布局独立保留。桌面插图的替换/恢复默认记录在本实例浏览器的 `reading-island-appearance-v1` IndexedDB，只影响该设备的外观；书籍、摘录、讨论及 AI 配置仍由后端管理。公开版本使用仓库内原创 SVG 默认素材，宿主可以替换自己的素材。
+
+主题背景、美化与阅读排版也保存在该浏览器的外观数据库，分类折叠只存本地偏好。人物预设随加密模型配置保存；定时议题由后端Alarm执行，其他后端接线需实现[定时接口](API.md)和[执行语义](TOPIC-SCHEDULE.md)。
 
 首版没有跨域 Cookie/postMessage 登录桥、独立 npm 组件包或所有技术栈的接入验证。跨域 iframe 不能照搬同源 Cookie 示例；需要宿主单独完成 origin 校验及专用会话交接。

@@ -459,3 +459,7 @@ OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
 PERFORMANCE OF THIS SOFTWARE.
 ```
 
+# Original paper texture
+
+`web/assets/kraft-paper.png` is an original AI-generated paper texture created for this project and distributed with its MIT assets. The supplied design-reference screenshots and their watermarks are not included.
+

@@ -4,6 +4,8 @@
 
 普通使用者优先阅读 [浏览器部署流程](START-HERE.md)，或让自己的 LLM 按 [操作指引](LLM-DEPLOY-GUIDE.md)教学。下方保留命令行备用流程。
 
+定时共读使用同一ReadingLibraryDO的Alarm，无需新增Cron/binding或改既有migration。更新自己的实例到新版后，可在“设置 → 议题设置”启用；默认暂停。见[定时说明](TOPIC-SCHEDULE.md)。
+
 ## 本地
 
 运行 `npm ci`，将 `.dev.vars.example` 复制为 `.dev.vars` 并填入两个不同随机值 READER_TOKEN/SESSION_SECRET，然后 `npm run dev`。访问 `http://127.0.0.1:4187/reading-island/`。数据在本项目 `.wrangler/` 的隔离开发存储中，不连接线上书库。

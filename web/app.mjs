@@ -1,8 +1,11 @@
 import { syncIslandBadgeAppearance, readingConfig,refreshReadingConfig } from './badge-appearance.mjs';
 import { ensureSession } from './session.mjs';
 import {openAISettings} from './ai-settings.mjs';
+import {initAppearance,applyAppearance,collapsedGroups,toggleGroup} from './appearance.mjs';
+import {openSettings,openAppearance} from './settings.mjs';
 await ensureSession();
 await refreshReadingConfig();
+await initAppearance();
 await import('./desktop.mjs');
 import { groupDiscussionMessages } from './discussion-messages.mjs';
 import { renderMarkdown } from './markdown.mjs';
@@ -157,10 +160,10 @@ function returnToBookTab(tab) {
 function render() {
   const previousView = app.dataset.view;
   const previousScroll = app.querySelector('.thread-scroll')?.scrollTop;
-  if (view === 'shelf') app.innerHTML = shelfView(state.books, state.groups, shelfSearch, menuOpen);
+  if (view === 'shelf') app.innerHTML = shelfView(state.books, state.groups, shelfSearch, menuOpen,collapsedGroups());
   if(view==='shelf'){
     const entry=document.createElement('button');entry.type='button';entry.className='ai-setup-entry';entry.dataset.action='ai-settings';
-    entry.textContent=readingConfig.aiConfigured?`${readingConfig.aiName} · 已连接 · 设置`:'连接自己的 AI · 填 Key、测试并保存';
+    entry.dataset.action='settings';entry.textContent='设置';
     app.querySelector('.search-box').after(entry);
   }
   if (view === 'group') app.innerHTML = groupView(state.books, groupName);
@@ -236,7 +239,7 @@ function readerView() {
   const chapter = currentChapter(doc);
   const previous = chapterIndex > 0;
   const next = chapterIndex < doc.chapters.length - 1;
-  return `<section class="reader-screen"><header class="reader-head">${btn(icon('back'), 'back', 'icon-btn', 'aria-label="返回上一层"')}<div><p>${esc(book.title)}</p><small>${esc(chapter.title)} · v${doc.version}</small></div>${btn(icon('search'), 'reader-search', 'icon-btn', 'aria-label="搜索本章"')}</header><div class="reader-tools"><span>选中原文后，可以高亮、摘抄或发起讨论</span><span class="scope-pill">仅限 ${esc(doc.document_id.slice(0, 12))}…</span></div><div class="chapter-reading">${doc.format === 'epub' ? '' : `<h1>${esc(chapter.title)}</h1>`}<article id="reader-text" class="reader-paper" data-document="${esc(doc.document_id)}" data-chapter="${esc(chapter.chapter_id || '')}"></article><nav class="chapter-turner"><button type="button" data-action="previous-chapter" ${previous ? '' : 'disabled'}>‹ 上一章</button><button type="button" data-action="journal-original">章节目录</button><button type="button" data-action="next-chapter" ${next ? '' : 'disabled'}>下一章 ›</button></nav></div><div id="selection-bar" class="selection-bar hidden"><button data-action="annotate-selection">高亮并摘抄</button><button data-action="discuss-selection">讨论这段</button></div></section>`;
+  return `<section class="reader-screen"><header class="reader-head">${btn(icon('back'), 'back', 'icon-btn', 'aria-label="返回上一层"')}<div><p>${esc(book.title)}</p><small>${esc(chapter.title)} · v${doc.version}</small></div>${btn(icon('search'), 'reader-search', 'icon-btn', 'aria-label="搜索本章"')}${btn('<svg class="icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>', 'reader-settings', 'icon-btn', 'aria-label="阅读排版设置"')}</header><div class="reader-tools"><span>选中原文后，可以高亮、摘抄或发起讨论</span><span class="scope-pill">仅限 ${esc(doc.document_id.slice(0, 12))}…</span></div><div class="chapter-reading">${doc.format === 'epub' ? '' : `<h1>${esc(chapter.title)}</h1>`}<article id="reader-text" class="reader-paper" data-document="${esc(doc.document_id)}" data-chapter="${esc(chapter.chapter_id || '')}"></article><nav class="chapter-turner"><button type="button" data-action="previous-chapter" ${previous ? '' : 'disabled'}>‹ 上一章</button><button type="button" data-action="journal-original">章节目录</button><button type="button" data-action="next-chapter" ${next ? '' : 'disabled'}>下一章 ›</button></nav></div><div id="selection-bar" class="selection-bar hidden"><button data-action="annotate-selection">高亮并摘抄</button><button data-action="discuss-selection">讨论这段</button></div></section>`;
 }
 
 function notesView() {
@@ -261,7 +264,7 @@ function globalThreadCard(thread) {
   const book = state.books.find((item) => item.book_id === thread.book_id);
   const note = state.annotations.find(n => n.annotation_id === thread.annotation_id);
   const opening = thread.messages?.[0]?.text || '';
-  return `<article class="discussion-card global-discussion" data-action="open-thread" data-thread="${thread.thread_id}" role="button" tabindex="0"><header><span>${thread.status === 'open' ? '讨论中' : '已结束'}</span><small>${esc((thread.created_at || '').slice(0, 10))}</small></header><h2>${esc(thread.topic || '围绕整本书')}</h2><p class="book-topic-context">${note ? '原文讨论' : '全书议题'} · 《${esc(book?.title || '未知书籍')}》</p>${note ? `<blockquote>${esc(note.anchor.exact)}</blockquote>` : ''}${opening ? `<div class="discussion-opening markdown-body"><span>${thread.messages?.[0]?.author === 'assistant' ? 'AI的开场：' : '我的开场：'}</span>${renderMarkdown(opening)}</div>` : ''}<footer><span>${note ? '原文讨论' : '全书议题'}</span><span>${thread.messages?.length || 0} 条回复</span></footer></article>`;
+  return `<article class="discussion-card global-discussion" data-action="open-thread" data-thread="${thread.thread_id}" role="button" tabindex="0"><header><span>${thread.status === 'open' ? '讨论中' : '已结束'}</span><small>${esc((thread.created_at || '').slice(0, 10))}</small></header><h2>${esc(thread.topic || '围绕整本书')}</h2><p class="book-topic-context">${note ? '原文讨论' : '全书议题'} · 《${esc(book?.title || '未知书籍')}》</p>${note ? `<blockquote>${esc(note.anchor.exact)}</blockquote>` : ''}${opening ? `<div class="discussion-opening markdown-body"><span>${thread.scheduled ? '定时任务：' : thread.messages?.[0]?.author === 'assistant' ? 'AI的开场：' : '我的开场：'}</span>${renderMarkdown(opening)}</div>` : ''}<footer><span>${note ? '原文讨论' : '全书议题'}</span><span>${thread.messages?.length || 0} 条回复</span></footer></article>`;
 }
 
 function threadView() {
@@ -276,7 +279,7 @@ function threadView() {
     : ['failed', 'interrupted', 'unavailable'].includes(thread.delivery_status) && thread.latest_turn_id
       ? `<p class="thread-delivery-status">这次回复暂时没有送达。${btn('重试', 'retry-turn', 'text-btn', `data-thread="${thread.thread_id}" data-turn="${thread.latest_turn_id}"`)}</p>`
       : '';
-  return `<section class="thread-screen"><header class="simple-head">${btn(icon('back'), 'back', 'icon-btn', 'aria-label="返回上一层"')}<div><p>${esc(thread.topic || (note ? '附在原文上的讨论' : '全书讨论'))}</p><small>${esc(book?.title || '')}</small></div>${btn(thread.status === 'open' ? '结束' : '重开', 'toggle-thread', 'text-btn', `data-thread="${thread.thread_id}"`)}</header><div class="thread-scroll"><article class="thread-anchor">${anchor}</article><div class="messages">${groupDiscussionMessages(thread.messages).map((group) => `<article class="message ${group.author === 'me' ? 'mine' : 'assistant'}"><b>${group.author === 'me' ? '我' : esc(readingConfig.aiName)}</b>${group.parts.map(message => `${message.quote ? `<blockquote class="message-quote">${esc(message.quote.text)}</blockquote>` : ''}<div class="markdown-body">${renderMarkdown(message.text)}</div>`).join('')}</article>`).join('')}</div>${delivery}</div>${thread.status === 'open' ? '<form id="reply-form" class="reply-box"><textarea id="reply-text" required placeholder="继续说说你的想法……"></textarea><button class="primary">回复</button></form>' : '<p class="empty-copy">讨论已结束，可以从右上角重新打开。</p>'}</section>`;
+  return `<section class="thread-screen"><header class="simple-head">${btn(icon('back'), 'back', 'icon-btn', 'aria-label="返回上一层"')}<div><p>${esc(thread.topic || (note ? '附在原文上的讨论' : '全书讨论'))}</p><small>${esc(book?.title || '')}</small></div>${btn(thread.status === 'open' ? '结束' : '重开', 'toggle-thread', 'text-btn', `data-thread="${thread.thread_id}"`)}</header><div class="thread-scroll"><article class="thread-anchor">${anchor}</article><div class="messages">${groupDiscussionMessages(thread.messages).map((group) => `<article class="message ${group.author === 'me' ? 'mine' : 'assistant'}"><b>${group.author === 'me' ? (thread.scheduled&&group.parts[0]?.sequence===0?'定时任务':'我') : esc(readingConfig.aiName)}</b>${group.parts.map(message => `${message.quote ? `<blockquote class="message-quote">${esc(message.quote.text)}</blockquote>` : ''}<div class="markdown-body">${renderMarkdown(message.text)}</div>`).join('')}</article>`).join('')}</div>${delivery}</div>${thread.status === 'open' ? '<form id="reply-form" class="reply-box"><textarea id="reply-text" required placeholder="继续说说你的想法……"></textarea><button class="primary">回复</button></form>' : '<p class="empty-copy">讨论已结束，可以从右上角重新打开。</p>'}</section>`;
 }
 
 function paintReader() {
@@ -293,6 +296,7 @@ function paintReader() {
     const start = offset, end = start + block.length;
     const isHeading = block.trim().replace(/\s+/g, ' ').toLowerCase() === chapter.title.trim().toLowerCase();
     const element = document.createElement(doc.format === 'epub' ? (isHeading ? 'h2' : 'p') : 'span');
+    element.className=isHeading?'reader-heading':'reader-paragraph';
     const boundaries = [...new Set([start,end,...notes.flatMap(({resolved})=>[Math.max(start,Math.min(end,resolved.start)),Math.max(start,Math.min(end,resolved.end))])])].sort((a,b)=>a-b);
     for(let i=0;i<boundaries.length-1;i++) {
       const left=boundaries[i],right=boundaries[i+1];
@@ -331,7 +335,7 @@ document.addEventListener('click', async (event) => {
   const control = event.target.closest('[data-action]');
   if (!control) return;
   const action = control.dataset.action;
-  if (cloud && !['back','toggle-menu','open-group','open-shelf'].includes(action)) {
+  if (cloud && !['back','toggle-menu','open-group','open-shelf','toggle-group','reader-settings'].includes(action)) {
     control.setAttribute('aria-busy', 'true');
     try { await ensureLibraryDetails(); } catch (error) { toast(error.message); return; }
     finally { control.removeAttribute('aria-busy'); }
@@ -343,6 +347,9 @@ document.addEventListener('click', async (event) => {
   if (action === 'note-detail') { const note=findNote(control.dataset.note); if(note) modal('完整摘录', `<blockquote class="full-excerpt">${esc(note.anchor.exact)}</blockquote><p>${esc(note.insight || '')}</p>${btn('在原文查看','open-note','secondary',`data-note="${noteKey(note)}"`)}`,''); return; }
   if (action === 'back') { goBack(); return; }
   if (action === 'open-shelf') { menuOpen = false; navigate('shelf', {bookId:null}); render(); return; }
+  if(action==='settings'){openSettings({books:state.books,groups:state.group_records||[],onAI:async()=>{await refreshReadingConfig();applyAppearance();render();}});return;}
+  if(action==='reader-settings'){openAppearance('reader');return;}
+  if(action==='toggle-group'){const position=app.querySelector('.shelf-books')?.scrollTop||0;toggleGroup(control.dataset.group);render();app.querySelector('.shelf-books').scrollTop=position;return;}
   if(action==='ai-settings'){await openAISettings(async()=>{await refreshReadingConfig();render();});return;}
   if (action === 'toggle-date' || action === 'date-month' || action === 'date-pick') {
     const field = control.closest('.date-field'), popup = field.querySelector('.date-popup'), input = field.querySelector('input');

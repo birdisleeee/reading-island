@@ -1,5 +1,5 @@
 {
-  "name": "reading-island", "version": "0.3.0", "private": true, "type": "module", "license": "MIT",
+  "name": "reading-island", "version": "0.4.0", "private": true, "type": "module", "license": "MIT",
   "cloudflare": { "bindings": {
     "READER_TOKEN": {"description":"你自己的共读岛访问密码。请填写新的随机密码，不是 DeepSeek Key。"},
     "SESSION_SECRET": {"description":"独立的至少32字符随机密钥，用于登录会话与加密保存模型配置。请长期保留；不填模型 Key。"},

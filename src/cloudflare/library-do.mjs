@@ -4,6 +4,8 @@ import { identity, text, requireValue, ReadingError, digest } from './validation
 import { coverType } from './covers.mjs';
 import { detectChapterRanges, detectFormat, parseDocumentBytes } from '../core/document-formats.mjs';
 import { DOMParser } from 'linkedom';
+import {normalizeSchedule,nextOccurrence} from '../core/schedule.mjs';
+import {dispatchReadingTurn} from './ai.mjs';
 
 class ReadingMarkupParser extends DOMParser {
   parseFromString(markup, mime) {
@@ -121,6 +123,17 @@ export class ReadingLibraryDO extends DurableObject {
   }
 
   async #execute(owner, operation, input) {
+    if(operation==='getSchedule')return this.#scheduleView();
+    if(operation==='putSchedule'){
+      let value;try{value=normalizeSchedule(input);}catch(error){throw new ReadingError(400,error.message);}
+      const saved=this.ctx.storage.transactionSync(()=>{
+        const old=this.#get('settings','schedule',false);requireValue(input.revision===(old?.revision||0),'revision_conflict',409);
+        if(value.enabled)requireValue(this.#get('settings','ai',false)||(this.env.AI_MODE==='model'&&this.env.MODEL_API_KEY)||(this.env.AI_MODE==='webhook'&&this.env.AI_WEBHOOK_URL),'ai_not_configured',409);
+        if(value.enabled){for(const id of value.book_ids)this.#get('book',id);if(value.scope==='group'&&value.group_id)this.#get('group',value.group_id);}
+        return this.#put('settings','schedule',{...value,origin:input.origin,revision:(old?.revision||0)+1,next_run:value.enabled?nextOccurrence(value):null,cursor:old?.cursor||0});
+      });
+      await this.#armSchedule(saved);return this.#scheduleView();
+    }
     if(operation==='getAISettings')return this.#get('settings','ai',false);
     if(operation==='putAISettings')return this.ctx.storage.transactionSync(()=>{
       const old=this.#get('settings','ai',false);requireValue(input.revision===(old?.revision||0),'revision_conflict',409);
@@ -389,6 +402,43 @@ export class ReadingLibraryDO extends DurableObject {
     throw new ReadingError(404, 'unknown_operation');
   }
 
+  #scheduleView(){
+    const saved=this.#get('settings','schedule',false)||{enabled:false,frequency:'weekly',time:'20:00',weekday:0,timezone:'Asia/Shanghai',scope:'all',group_id:'',book_ids:[],instruction:'请先读取原文，主动提出一个值得一起讨论的问题，邀请我回应。',revision:0,next_run:null};
+    const {origin,cursor,...publicValue}=saved;
+    const runs=this.ctx.storage.sql.exec("SELECT value FROM reading_records WHERE kind='schedule_run' ORDER BY id DESC LIMIT 8").toArray().map(row=>JSON.parse(row.value));
+    return {...publicValue,runs};
+  }
+  async #armSchedule(config=this.#get('settings','schedule',false)){
+    if(config?.enabled&&config.next_run)await this.ctx.storage.setAlarm(config.next_run);else await this.ctx.storage.deleteAlarm();
+  }
+  async alarm(){
+    const owner=this.ctx.storage.sql.exec('SELECT id FROM reading_owner LIMIT 1').toArray()[0]?.id;if(!owner)return;
+    const config=this.#get('settings','schedule',false);if(!config?.enabled)return;
+    const time=Date.now();if(config.next_run>time){await this.#armSchedule(config);return;}
+    const runId=`run_${config.next_run}`;let run;
+    // Atomically consume the occurrence and arm the next. A restarted alarm cannot repeat a paid request.
+    this.ctx.storage.transactionSync(()=>{
+      if(this.#get('schedule_run',runId,false))return;
+      const books=this.ctx.storage.sql.exec("SELECT value FROM reading_records WHERE kind='book' AND COALESCE(json_extract(value,'$.archived'),0)=0 ORDER BY id").toArray().map(row=>JSON.parse(row.value)).filter(book=>{
+        const doc=book.current_document_id?this.#get('document',book.current_document_id,false):null;
+        return doc?.status==='ready'&&doc.length>0&&(config.scope==='all'||config.scope==='reading'&&book.reading_status==='reading'||config.scope==='group'&&book.group_id===config.group_id||config.scope==='books'&&config.book_ids.includes(book.book_id));
+      });
+      const book=books[config.cursor%Math.max(1,books.length)],late=time-config.next_run>6*3600000;
+      run=this.#put('schedule_run',runId,{run_id:runId,due_at:config.next_run,status:late?'skipped_late':book?'preparing':'skipped_no_book',book_id:book?.book_id||null});
+      this.#put('settings','schedule',{...config,next_run:nextOccurrence(config,time),cursor:config.cursor+(book&&!late?1:0)});
+    });
+    await this.#armSchedule();if(!run||run.status!=='preparing')return;
+    const base=`scheduled_${config.next_run}`,threadId=base+'_thread',turnId=base+'_turn';
+    try{
+      const created=await this.call(owner,'createThread',{book_id:run.book_id,thread_id:threadId,turn_id:turnId,delivery_id:base+'_delivery',opening_message_id:base+'_message',title:'定时共读 · '+new Intl.DateTimeFormat('zh-CN',{timeZone:config.timezone,dateStyle:'short'}).format(new Date(config.next_run)),opening:config.instruction});
+      if(!created.ok)throw new Error('topic_create_failed');
+      this.#put('schedule_run',runId,{...run,status:'dispatching',thread_id:threadId});
+      const thread=this.#get('thread',threadId);this.#put('thread',threadId,{...thread,scheduled:true});
+      const stub={call:(...args)=>this.call(...args)};
+      const result=await dispatchReadingTurn(this.env,stub,turnId,owner,config.origin);
+      this.#put('schedule_run',runId,{...run,status:result.status,thread_id:threadId});
+    }catch{this.#put('schedule_run',runId,{...run,status:'failed',thread_id:threadId});}
+  }
   async call(owner, operation, input = {}) {
     try {
       identity(owner);

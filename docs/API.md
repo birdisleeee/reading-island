@@ -26,7 +26,9 @@
 
 ## 格式边界
 
-AI设置另有：GET `/api/ai-settings`（无Key正文），POST `/api/ai-settings/test`（provider/api_url/model/api_key/name/system_prompt），PUT `/api/ai-settings`（相同字段+proof+revision）。只允许已登录读者访问，写入拒绝跨源；空api_key表示沿用本人已保存的Key。test使用小型合成内容调用所填服务，返回短时测试凭据；save校验当前配置及用户，未测试或更改配置返回409。测试会使用所填服务的余额，不自动重试。
+AI设置另有：GET `/api/ai-settings`（无Key正文），POST `/api/ai-settings/test`（provider/api_url/model/api_key/name/system_prompt/persona），PUT `/api/ai-settings`（相同字段+proof+revision）。persona最多12000字符，为模型在议题资料之前收到的人物预设。只允许已登录读者访问，写入拒绝跨源；空api_key表示沿用本人已保存的Key。test使用小型合成内容调用所填服务，返回短时测试凭据；save校验当前配置及用户，未测试或更改配置返回409。测试会使用所填服务的余额，不自动重试。
+
+定时设置：GET/PUT `/api/topic-schedule`，仅读者本人可读写。字段 `enabled,frequency:daily/weekly,time:HH:mm,weekday:0..6,timezone,scope:all/reading/group/books,group_id,book_ids,instruction,revision`；空group_id表示堆放。返回 `next_run`（UTC毫秒）和最近 `runs`。启用需已配置AI及有效书籍范围，revision冲突返回409；暂停删除后端闹钟。执行语义见[定时议题](TOPIC-SCHEDULE.md)。
 
 TXT/Markdown 规范换行；HTML 提取正文；DOCX/EPUB 解析无加密正文及章节，复杂文件可能退回原件模式。PDF、旧 DOC 和 Kindle 格式只保留原件，没有 OCR、DRM 解密或精准阅读承诺。
 
