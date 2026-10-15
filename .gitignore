@@ -10,3 +10,8 @@ docs/PREPARATION.md
 playwright-report/
 test-results/
 .agent-data/
+
+android-app/build/
+*.keystore
+*.jks
+*.apk

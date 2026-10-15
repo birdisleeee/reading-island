@@ -36,9 +36,12 @@ export class ReadingLibraryDO extends DurableObject {
   }
 
   #put(kind, id, value) {
+    this.beforeRecordWrite?.(kind, id, value);
     this.ctx.storage.sql.exec('INSERT INTO reading_records(kind, id, book_id, value) VALUES (?, ?, ?, ?) ON CONFLICT(kind, id) DO UPDATE SET value = excluded.value', kind, id, value.book_id || '', JSON.stringify(value));
     return value;
   }
+
+  documentBucket() { return this.env.BOOK_BUCKET; }
 
   #create(kind, id, value) {
     const old = this.#get(kind, id, false);
@@ -100,7 +103,7 @@ export class ReadingLibraryDO extends DurableObject {
     });
     if (reservation.status === 'ready') return reservation;
     // External R2 I/O deliberately outside SQL transaction. Retry uses same reservation.
-    await storeFrozenDocument(this.env.BOOK_BUCKET, { owner_id: owner, book_id: bookId }, { ...reservation, text: source }, input.bytes);
+    await storeFrozenDocument(this.documentBucket(), { owner_id: owner, book_id: bookId }, { ...reservation, text: source }, input.bytes);
     return this.ctx.storage.transactionSync(() => {
       const book = this.#get('book', bookId), current = this.#get('document', documentId);
       if (current.status === 'ready') return current;
@@ -118,7 +121,7 @@ export class ReadingLibraryDO extends DurableObject {
     requireValue(doc.book_id === bookId && doc.status === 'ready', 'document_unavailable', 404);
     const start = input.start, end = input.end;
     requireValue(Number.isSafeInteger(start) && Number.isSafeInteger(end) && start >= 0 && end > start && end - start <= 4000 && end <= doc.length, 'invalid_range');
-    const range = await readFrozenRange(this.env.BOOK_BUCKET, { owner_id: owner, book_id: bookId }, doc, start, end - start);
+    const range = await readFrozenRange(this.documentBucket(), { owner_id: owner, book_id: bookId }, doc, start, end - start);
     requireValue(range.end === end && range.text === input.exact, 'excerpt_mismatch', 409);
     return this.#create('annotation', annotationId, { annotation_id: annotationId, book_id: bookId, document_id: doc.document_id, document_version: doc.version, text_sha256: doc.text_sha256, anchor: { start, end, exact: range.text }, insight: text(input.insight, 10000, true), purpose: input.purpose === 'discussion' ? 'discussion' : 'excerpt' });
   }
@@ -242,9 +245,9 @@ export class ReadingLibraryDO extends DurableObject {
       requireValue(book.revision === input.revision, 'revision_conflict', 409);
       const type = coverType(input.bytes), hash = await digest(input.bytes);
       const key = `reading-island/v1/owners/${owner}/books/${book.book_id}/covers/${hash}`;
-      const published = await this.env.BOOK_BUCKET.put(key, input.bytes, { onlyIf: { etagDoesNotMatch: '*' }, httpMetadata: { contentType: type } });
+      const published = await this.documentBucket().put(key, input.bytes, { onlyIf: { etagDoesNotMatch: '*' }, httpMetadata: { contentType: type } });
       if (!published) {
-        const existing = await this.env.BOOK_BUCKET.get(key);
+        const existing = await this.documentBucket().get(key);
         requireValue(existing && existing.size === input.bytes.byteLength && await digest(new Uint8Array(await existing.arrayBuffer())) === hash, 'cover_storage_conflict', 503);
       }
       return this.ctx.storage.transactionSync(() => {
@@ -260,7 +263,7 @@ export class ReadingLibraryDO extends DurableObject {
       const chapters = input.chapters.map((row, index) => ({ chapter_id: `${doc.document_id}_${index}`, title: text(row.title, 100), start: row.start, end: input.chapters[index + 1]?.start ?? doc.length, order: index, source: 'manual' }));
       requireValue(chapters[0].start === 0 && chapters.every(row => Number.isSafeInteger(row.start) && row.start >= 0 && Number.isSafeInteger(row.end) && row.end > row.start && row.end <= doc.length), 'invalid_chapters');
       for (const row of chapters) {
-        try { await readFrozenRange(this.env.BOOK_BUCKET, { owner_id: owner, book_id: doc.book_id }, doc, row.start, Math.min(2, doc.length - row.start)); }
+        try { await readFrozenRange(this.documentBucket(), { owner_id: owner, book_id: doc.book_id }, doc, row.start, Math.min(2, doc.length - row.start)); }
         catch { throw new ReadingError(400, 'invalid_chapter_boundary'); }
       }
       return this.ctx.storage.transactionSync(() => {
@@ -283,7 +286,7 @@ export class ReadingLibraryDO extends DurableObject {
       requireValue(doc.status === 'ready' && doc.book_id === input.book_id, 'document_unavailable', 404);
       requireValue(input.version === doc.version && input.text_sha256 === doc.text_sha256, 'frozen_version_mismatch', 409);
       requireValue(input.start <= doc.length, 'invalid_range');
-      return readFrozenRange(this.env.BOOK_BUCKET, { owner_id: owner, book_id: doc.book_id }, doc, input.start, input.limit);
+      return readFrozenRange(this.documentBucket(), { owner_id: owner, book_id: doc.book_id }, doc, input.start, input.limit);
     }
     if (operation === 'createAnnotation') return this.#annotation(owner, input);
     if (operation === 'discussionContext') {
@@ -443,7 +446,7 @@ export class ReadingLibraryDO extends DurableObject {
       requireValue(thread.document_id === doc.document_id && doc.book_id === thread.book_id && doc.status === 'ready', 'source_mismatch', 409);
       requireValue(input.version === doc.version && input.text_sha256 === doc.text_sha256, 'frozen_version_mismatch', 409);
       requireValue(Number.isSafeInteger(input.start) && input.start >= 0 && Number.isSafeInteger(input.limit) && input.limit > 0 && input.limit <= 4000 && input.start <= doc.length, 'invalid_range');
-      return readFrozenRange(this.env.BOOK_BUCKET, { owner_id: owner, book_id: doc.book_id }, doc, input.start, input.limit);
+      return readFrozenRange(this.documentBucket(), { owner_id: owner, book_id: doc.book_id }, doc, input.start, input.limit);
     }
     throw new ReadingError(404, 'unknown_operation');
   }

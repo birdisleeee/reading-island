@@ -16,7 +16,8 @@ export function createReadingClient({ getToken = () => null, fetchImpl = globalT
     if (response.ok && blob) return response.blob();
     const value = await response.json();
     if (!response.ok) {
-      const message = response.status === 409
+      const publicErrors={storage_quota_exceeded:'存储额度不足，请到账户页申请扩容。',record_quota_exceeded:'书籍或议题已达上限，请到账户页申请扩容。',public_quota_unavailable:'公共服务额度不足或账号已暂停，请查看账户状态。',public_account_required:value.message||'请到公共服务账户页登录并等待审批。'};
+      const message = publicErrors[value.error] || (response.status === 409
         ? '内容已更新，请刷新后重试。'
         : response.status === 401
           ? '请重新登录共读岛。'
@@ -24,7 +25,7 @@ export function createReadingClient({ getToken = () => null, fetchImpl = globalT
             ? '请使用读者身份进入共读岛。'
             : response.status === 503
               ? '共读岛云端暂时不可用，请稍后重试。'
-              : '暂时无法保存或读取，请稍后重试。';
+              : '暂时无法保存或读取，请稍后重试。');
       throw Object.assign(new Error(message), { code: value.error, status: response.status });
     }
     return value;

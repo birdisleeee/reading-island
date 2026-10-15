@@ -1,6 +1,7 @@
 import {identity,requireValue,ReadingError,readJson} from './validation.mjs';
 import {issueToken,verifyToken} from '../core/auth.mjs';
 import {endpoint,runModel} from '../core/model-adapter.mjs';
+import {meteredModelFetch} from './service-meter.mjs';
 const encode=new TextEncoder();
 export const DEEPSEEK={provider:'deepseek',api_url:'https://api.deepseek.com/chat/completions',model:'deepseek-flash',name:'阅读伙伴',system_prompt:''};
 const defaults=()=>({...DEEPSEEK,allow_upload:false,has_key:false,configured:false,revision:0,tested_at:null});
@@ -27,6 +28,7 @@ async function normalize(env,owner,input){
 }
 async function fingerprint(value){return [...new Uint8Array(await crypto.subtle.digest('SHA-256',encode.encode(JSON.stringify(value))))].map(n=>n.toString(16).padStart(2,'0')).join('');}
 export async function probeAISettings(env,owner,input,fetchImpl=fetch){
+  fetchImpl=meteredModelFetch(env,owner,fetchImpl);
   requireValue(env.SESSION_SECRET,'auth_not_configured',503);
   const value=await normalize(env,owner,input);let sourceRead=false;
   const text=await runModel({env:{MODEL_API_URL:value.api_url,MODEL_API_KEY:value.api_key,MODEL_NAME:value.model,MODEL_PROVIDER:value.provider},payload:{book:{title:'连接测试短文'},discussion:{topic:'测试原文工具'},source_link:'reading://source/probe/doc',user_message:{text:'请先调用 read_source，start=0、limit=100，再用一句话回答读到的内容。'}},probe:true,readSource:async()=>{sourceRead=true;return {text:'这是一段用于验证共读接线的原创短文。',start:0,end:22};},fetchImpl});
@@ -34,7 +36,7 @@ export async function probeAISettings(env,owner,input,fetchImpl=fetch){
   const proof=await issueToken(env.SESSION_SECRET,{purpose:'ai-tested',user_id:owner,fingerprint:await fingerprint(value)},600);
   return {ok:true,proof,message:'连接成功，已验证文字回复和原文读取工具。测试通过后可保存。'};
 }
-const messages={api_key_required:'请填写 API Key。',model_auth_failed:'Key 无效或没有此模型的访问权限。',model_credit_failed:'服务返回余额或支付问题，请检查自己的 API 账户。',model_rate_limited:'服务暂时限流，请稍后手动测试。',model_request_failed:'服务拒绝了测试请求，请检查地址、模型和工具支持。',model_unreachable:'连接失败或超时，请检查服务地址。',source_tool_not_supported:'文字服务可连接，但原文工具未通过，请换用支持工具调用的模型。',settings_key_unreadable:'已保存的 Key 无法读取，请重新填写 Key。',invalid_ai_endpoint:'请输入公开的 HTTPS 接口地址，不要在 URL 中填写密钥。',invalid_model:'请检查模型名称。',test_required:'请先测试当前配置，成功后再保存。',revision_conflict:'配置已在另一窗口修改，请重新打开设置。'};
+const messages={public_quota_unavailable:'公共服务额度不足或账号已暂停，请在账户页查看并申请扩容。',api_key_required:'请填写 API Key。',model_auth_failed:'Key 无效或没有此模型的访问权限。',model_credit_failed:'服务返回余额或支付问题，请检查自己的 API 账户。',model_rate_limited:'服务暂时限流，请稍后手动测试。',model_request_failed:'服务拒绝了测试请求，请检查地址、模型和工具支持。',model_unreachable:'连接失败或超时，请检查服务地址。',source_tool_not_supported:'文字服务可连接，但原文工具未通过，请换用支持工具调用的模型。',settings_key_unreadable:'已保存的 Key 无法读取，请重新填写 Key。',invalid_ai_endpoint:'请输入公开的 HTTPS 接口地址，不要在 URL 中填写密钥。',invalid_model:'请检查模型名称。',test_required:'请先测试当前配置，成功后再保存。',revision_conflict:'配置已在另一窗口修改，请重新打开设置。'};
 export async function handleAISettings(request,env,principal){
   const json=(value,status=200)=>Response.json(value,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
   try{

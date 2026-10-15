@@ -1,0 +1,15 @@
+{
+ "name":"reading-island-public",
+ "main":"../dist/public-worker.mjs",
+ "compatibility_date":"2026-07-30",
+ "compatibility_flags":["nodejs_compat"],
+ "assets":{"directory":"../dist/assets","binding":"ASSETS","run_worker_first":true},
+ "durable_objects":{"bindings":[{"name":"REGISTRY","class_name":"Registry"},{"name":"READING_LIBRARY","class_name":"HostedReadingLibraryDO"}]},
+ "migrations":[{"tag":"public-v1","new_sqlite_classes":["Registry","HostedReadingLibraryDO"]}],
+ "vars":{"PUBLIC_SERVICE":"true","AI_MODE":"mock","AI_NAME":"阅读伙伴"},
+ "routes":[{"pattern":"reading.nyachu.site","custom_domain":true}],
+ "ratelimits":[
+  {"name":"EDGE_RATE","namespace_id":"2026101505","simple":{"limit":120,"period":60}},
+  {"name":"DOWNLOAD_RATE","namespace_id":"2026101506","simple":{"limit":6,"period":60}}
+ ]
+}

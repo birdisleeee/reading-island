@@ -1,5 +1,13 @@
 # Reading Island contributor rules
 
+## 2026-10-15 public service release
+
+The maintainer requested hosting at reading.nyachu.site, an Android APK, three manually approved public accounts, and the same application/quota rules as the companion booking service. Users supply their own model keys; the maintainer supplies hosting and storage. The optional public-service adapter uses separate Registry and HostedReadingLibraryDO namespaces; books are chunked into owner-isolated SQLite storage. The default standalone R2 deployment remains available.
+
+The maintainer explicitly confirmed the local result and authorized publication. The independent public service is deployed at https://reading.nyachu.site/app with three approval slots and no approved accounts at release. Registration precedes approval; users refresh after approval and sign in with their own account/password. There is no application-code flow. APK download and reviewed module/UI hashes were verified live; the temporary zero-quota release-check account was removed. All 54 tests passed in the isolated exact-artifact gate, with release checks, zero dependency vulnerabilities and deployment dry-run passing. See docs/PUBLIC-SERVICE-RELEASE.md.
+
+Desktop/mobile application and review flows were checked locally. Android device file selection/download/back behavior still needs device acceptance. Browser file-chooser automation timed out; upload/download integrity was verified through the API and rendered reader instead. Future changes still require the local review-first confirmation below.
+
 Read README.md, docs/START-HERE.md, docs/API.md, docs/AI-INTEGRATION.md and docs/EMBEDDING.md before changing behaviour. Deployment changes also require docs/DEPLOYMENT.md and docs/LLM-DEPLOY-GUIDE.md.
 
 - This repository is maintained independently. Changes apply only here by default. Updating an external integration requires its maintainer's explicit request and separate validation/release.

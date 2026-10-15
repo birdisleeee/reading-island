@@ -42,6 +42,6 @@ Agent：配置 `AI_WEBHOOK_URL`（完整 HTTPS 接收地址）与 `PUBLIC_BASE_U
 
 保存原件、规范文本、分块和 manifest 后才切当前版本。旧版本、旧引用和讨论保留。升级前由部署者保存现有资源和数据备份，保留 migration 历史及原 namespace/bucket；回退代码时不要删除书库资源或创建空库代替旧库。
 
-首版没有自动备份/导出工具。Cloudflare 账户、云资源和模型调用费用由部署者承担；没有由项目维护者托管的共享在线服务。
+首版没有自动备份/导出工具。Cloudflare 账户、云资源和模型调用费用由部署者承担；可选公共托管方案及独立部署边界见 [公共服务适配器](../public-service/README.md)。
 
 实现依据：[Wrangler 配置](https://developers.cloudflare.com/workers/wrangler/configuration/)、[SQLite Durable Objects](https://developers.cloudflare.com/durable-objects/best-practices/access-durable-objects-storage/)。

@@ -17,6 +17,10 @@ A reusable reading space for you and your own AI: books, chapters, excerpts, and
 - 电脑端使用分类侧栏、宽幅阅读面板和书籍网格；搜索/标题/插图固定，书架独立滚动。插图可替换、取消或恢复默认，外观只保存在当前浏览器。
 - 牛皮纸主题、美化设置、分类展开/收起、独立原文排版；AI 支持人物预设，后端可按日或按周定时发起书籍议题；普通模型可选用随包提供的文本新增书籍工具，默认关闭，已有 Agent 上传接口独立保留。
 
+## 公共服务与 Android
+
+[公共服务入口](https://reading.nyachu.site/app) · [下载 APK](https://reading.nyachu.site/download/app.apk)。提供 3 个需人工申请、审核的公共名额；用户使用自己的模型 Key，我们提供网页和限额存储。初始申请为零额度，获批后进入书架；扩容仍需申请。托管规则和部署说明见 [公共服务文档](public-service/README.md)，[Android 构建说明](android-app/README.md)。
+
 ## 快速开始
 
 **只有 API Key 的使用者，从这里开始：[零基础部署与 DeepSeek 接入](docs/START-HERE.md)。**

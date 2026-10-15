@@ -1,20 +1,46 @@
 {
-  "name": "reading-island", "version": "0.4.0", "private": true, "type": "module", "license": "MIT",
-  "cloudflare": { "bindings": {
-    "READER_TOKEN": {"description":"你自己的共读岛访问密码。请填写新的随机密码，不是 DeepSeek Key。"},
-    "SESSION_SECRET": {"description":"独立的至少32字符随机密钥，用于登录会话与加密保存模型配置。请长期保留；不填模型 Key。"},
-    "BOOK_BUCKET": {"description":"在你的 Cloudflare 账户保存自己的书籍。需先开通自己的 R2。"},
-    "READING_LIBRARY": {"description":"在你的账户保存自己的书库、摘录、讨论和加密 AI 配置。"}
-  }},
-  "engines": { "node": ">=22" },
+  "name": "reading-island",
+  "version": "0.5.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "cloudflare": {
+    "bindings": {
+      "READER_TOKEN": {
+        "description": "你自己的共读岛访问密码。请填写新的随机密码，不是 DeepSeek Key。"
+      },
+      "SESSION_SECRET": {
+        "description": "独立的至少32字符随机密钥，用于登录会话与加密保存模型配置。请长期保留；不填模型 Key。"
+      },
+      "BOOK_BUCKET": {
+        "description": "在你的 Cloudflare 账户保存自己的书籍。需先开通自己的 R2。"
+      },
+      "READING_LIBRARY": {
+        "description": "在你的账户保存自己的书库、摘录、讨论和加密 AI 配置。"
+      }
+    }
+  },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "build": "node tools/build.mjs",
+    "build": "node tools/build.mjs && node public-service/build.mjs",
     "dev": "npm run build && wrangler dev --ip 127.0.0.1 --port 4187",
+    "dev:public": "npm run build && wrangler dev --config public-service/wrangler.jsonc --ip 127.0.0.1 --port 4215",
     "deploy": "npm run build && wrangler deploy",
     "test": "npm run build && node --test web/model.test.mjs web/markdown.test.mjs web/discussion-messages.test.mjs test/*.test.mjs",
     "check": "node tools/check-release.mjs"
   },
-  "dependencies": { "linkedom": "0.18.13" },
-  "devDependencies": { "esbuild": "0.28.2", "miniflare": "4.20260730.0", "wrangler": "4.150.0" },
-  "overrides": { "undici": "7.29.1", "sharp": "0.35.5" }
+  "dependencies": {
+    "linkedom": "0.18.13"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "miniflare": "4.20260730.0",
+    "wrangler": "4.150.0"
+  },
+  "overrides": {
+    "undici": "7.29.1",
+    "sharp": "0.35.5"
+  }
 }

@@ -13,6 +13,10 @@ async function readSession(response) {
 export async function ensureSession() {
   const session = await fetch('/api/session',{cache:'no-store'});
   if (session.ok) return readSession(session);
+  if ([401,403].includes(session.status)) {
+    const problem=await session.clone().json().catch(()=>null);
+    if(problem?.loginUrl==='/app') { location.assign('/app'); await new Promise(()=>{}); }
+  }
   if (session.status !== 401) throw new Error('暂时无法确认登录状态，请重试。');
   const root=document.querySelector('#app');
   root.innerHTML='<section class="empty"><h1>共读岛</h1><p>接入自己的 AI，一起读书。</p><form id="reading-login"><label>访问密码<input name="password" type="password" autocomplete="current-password" required></label><button class="primary" type="submit">进入书架</button><p role="status"></p></form></section>';

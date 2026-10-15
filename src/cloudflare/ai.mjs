@@ -2,6 +2,7 @@ import { identity, ReadingError, requireValue, readBody } from './validation.mjs
 import { hmacHex, equalHex, issueToken, verifyToken } from '../core/auth.mjs';
 import { runModel, endpoint } from '../core/model-adapter.mjs';
 import { effectiveAIEnv } from './ai-settings.mjs';
+import {meteredModelFetch} from './service-meter.mjs';
 
 export async function readVerifiedGatewayJson(request,env) {
   requireValue(env.AI_SHARED_SECRET,'gateway_not_configured',503);
@@ -53,10 +54,11 @@ export async function dispatchReadingTurn(env,stub,turnId,owner,origin,fetchImpl
     let text;
     if(mode==='mock') text=`**演示回复（Mock）**\n\n我们正在讨论《${payload.book.title}》中的“${payload.discussion.topic}”。\n\n${payload.source ? '> '+payload.source.exact+'\n\n' : ''}你刚才说：${payload.user_message.text}\n\n这是用于验证接线的模拟回复。配置自己的 AI 后，就可以继续真实共读。`;
     else if(mode==='model') {
+      const modelFetch=meteredModelFetch(env,owner,fetchImpl);
       const history=await stub.call(owner,'modelHistory',{turn_id:turnId});
       const thread=await stub.call(owner,'get',{kind:'thread',id:payload.thread_id});
       const uploadAllowed=(env.MODEL_ALLOW_UPLOAD===true||env.MODEL_ALLOW_UPLOAD==='true')&&thread.ok&&!thread.value.scheduled;
-      text=await runModel({env,payload,history:history.ok?history.value:[],fetchImpl,...(uploadAllowed?{addBook:async args=>{const result=await stub.call(owner,'modelAddBook',{...args,turn_id:turnId});if(!result.ok)throw new Error('Book upload rejected');return result.value;}}:{}),readSource:async(start,limit)=>{
+      text=await runModel({env,payload,history:history.ok?history.value:[],fetchImpl:modelFetch,...(uploadAllowed?{addBook:async args=>{const result=await stub.call(owner,'modelAddBook',{...args,turn_id:turnId});if(!result.ok)throw new Error('Book upload rejected');return result.value;}}:{}),readSource:async(start,limit)=>{
         const result=await stub.call(owner,'gatewaySource',sourceInput(payload,start,limit));
         if(!result.ok)throw new Error('Source unavailable');return result.value;
       }});
@@ -66,7 +68,11 @@ export async function dispatchReadingTurn(env,stub,turnId,owner,origin,fetchImpl
     const next=await stub.call(owner,'nextPending',{thread_id:payload.thread_id});
     if(next.ok&&next.value&&depth<32)await dispatchReadingTurn(env,stub,next.value.turn_id,owner,origin,fetchImpl,depth+1);
     return {status:'completed',turn_id:turnId,delivery_id:turn.delivery_id};
-  } catch {
+  } catch(error) {
+    if(error?.code==='public_quota_unavailable'){
+      await stub.call(owner,'markDispatch',{turn_id:turnId,status:'unavailable',detail_code:'public_quota_unavailable'});
+      return {status:'unavailable',reason:'public_quota_unavailable',turn_id:turnId};
+    }
     // External Agent must reconcile uncertain requests using the same delivery identity.
     // Model calls are never automatically repeated after an unknown result.
     if(mode==='webhook') {
