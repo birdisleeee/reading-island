@@ -8,6 +8,18 @@
 
 只有匹配当前配置/当前用户且未过期的成功测试凭据才允许保存。配置变化需重测，凭据10分钟过期，revision防止跨窗口覆盖。Key在本实例DO中加密存储；GET只返回has_key，重开设置留空沿用。已保存配置优先于环境变量。具体首次部署见[从零开始](START-HERE.md)。
 
+测试输入是一段原创短文：“这是一段用于验证共读接线的原创短文。”第一步要求模型调用 `read_source(start=0, limit=100)`；第二步把此短文作为工具结果交给模型，验证它能回复一句话。成功和失败都在设置表单显示结果；失败包括 Key 无效、余额不足、限流、超时或不支持工具。测试不发送现有书库，通常产生两次小型模型 API 请求。当前预设的人物与风格会绑定成功凭据，实际讨论才使用这些人物设定。
+
+## AI 能否放书进书库？
+
+书籍创建和文档上传的 HTTP 接口已经提供，见 [API](API.md)。已有 Agent 可以在自己的可信服务端接入这些接口，并使用该读者授权的服务端鉴权；阅读回合的 `source_access` token 只能读取当前议题原文，不能用来上传书。参考后端尚无专门的 Agent 限权上传 token 或网页授权入口；已有 Agent 在自己的可信服务器管理上传权限。
+
+只填写模型 API Key 的共读模式默认仅开放 `read_source`。现在包中还提供可选的 `add_book(title, author?, content, format?)` 工具，在 **设置 → AI 接入 → 可选书库工具** 开启“允许模型新增文本书籍”，测试并保存后即可使用。例如在一个议题中说：“把上面整理的文字存成一本书，书名是《海边札记》。”模型决定调用工具，由自己的后端保存 TXT/Markdown 文本并返回书籍身份。它不具备联网找书、下载文件或读取电脑文件的能力，不能把生成的摘要假称为整本原书。
+
+上传默认关闭；测试接口不上传书。每轮最多新增一本，正文最多100000字符，书籍和文档身份由后端生成；不能由模型选择 owner、已有 book_id、地址或凭据，也不提供覆盖或删除。写入按可信 owner 和 turn 幂等，新正文与版本继续通过现有冻结文档/R2流程；未完整保存的预约不会作为可读书出现在书架。定时议题不开放新增工具。已有 Agent 的 HTTP 上传和 Webhook 回调路径不受这个模型权限开关影响。
+
+非 Cloudflare 宿主可复用 `src/core/model-adapter.mjs` 导出的 `ADD_BOOK_TOOL`，给 `runModel` 传入自己的 `addBook(args)` 回调；必须在可信服务器执行，并绑定已验证的读者和稳定回合身份。默认不传回调就不提供写入工具。使用纯服务端模型配置时，可设置 `MODEL_ALLOW_UPLOAD=true`；网页保存的配置及权限优先。
+
 DeepSeek预设为官方Chat Completions完整地址和当前deepseek-flash模型，明确thinking disabled，适配当前文本工具循环。未提供思考模式历史reasoning_content持久化；不声明已支持该模式。说明与来源见[DeepSeek官方思考模式](https://api-docs.deepseek.com/guides/thinking_mode/)。
 
 ## 已有 Agent：HTTPS Webhook
@@ -18,6 +30,7 @@ DeepSeek预设为官方Chat Completions完整地址和当前deepseek-flash模型
 {
   "protocol": "reading-turn-v1",
   "owner_id": "reader",
+  "reader": { "user_id": "reader", "username": "海边读者" },
   "thread_id": "thread_demo",
   "turn_id": "turn_demo",
   "delivery_id": "delivery_demo",
@@ -32,7 +45,7 @@ DeepSeek预设为官方Chat Completions完整地址和当前deepseek-flash模型
 }
 ```
 
-没有可读文档时 source_link 为 null；有摘录时 source 包含 exact、insight 和冻结版本身份。同一 turn 的书籍与议题信息在首次准备时冻结。已有 Agent 使用 session_id 隔离短期议题会话，继续使用自己的既有人格和长期记忆机制。
+没有可读文档时 source_link 为 null；有摘录时 source 包含 exact、insight 和冻结版本身份。同一 turn 的书籍、议题与 reader 身份信息在首次准备时冻结，重试不随改名变化；升级前已冻结的旧回合可能不含 reader。新回合从后端登录归属及读者资料生成 reader，不采信消息正文里的身份字段。模型 API 同样收到 reader，用户名仅作为称呼资料，不能当作操作指令或授权。已有 Agent 使用 session_id 隔离短期议题会话，可用 reader.user_id 关联读者，继续使用自己的既有人格和长期记忆机制。
 
 验证 `X-Webhook-Timestamp` 和 `X-Webhook-Signature-V2`：签名为 HMAC-SHA256(sharedSecret, `timestamp + "." + 原始UTF-8请求正文`)，输出小写十六进制；时间窗为300秒。不能先解析并重新序列化后再验签。
 

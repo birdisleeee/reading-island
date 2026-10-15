@@ -3,7 +3,7 @@ import {issueToken,verifyToken} from '../core/auth.mjs';
 import {endpoint,runModel} from '../core/model-adapter.mjs';
 const encode=new TextEncoder();
 export const DEEPSEEK={provider:'deepseek',api_url:'https://api.deepseek.com/chat/completions',model:'deepseek-flash',name:'阅读伙伴',system_prompt:''};
-const defaults=()=>({...DEEPSEEK,has_key:false,configured:false,revision:0,tested_at:null});
+const defaults=()=>({...DEEPSEEK,allow_upload:false,has_key:false,configured:false,revision:0,tested_at:null});
 const namespace=(env,owner)=>env.READING_LIBRARY.getByName(`reading-island:v1:owner:${identity(owner)}`);
 async function record(env,owner){const result=await namespace(env,owner).call(owner,'getAISettings');if(!result.ok)throw new ReadingError(result.status,result.error);return result.value;}
 async function key(env){requireValue(env.SESSION_SECRET,'auth_not_configured',503);const hash=await crypto.subtle.digest('SHA-256',encode.encode('reading-ai-settings-v1:'+env.SESSION_SECRET));return crypto.subtle.importKey('raw',hash,{name:'AES-GCM'},false,['encrypt','decrypt']);}
@@ -12,7 +12,7 @@ const bytes=value=>Uint8Array.from(atob(value),char=>char.charCodeAt(0));
 async function encrypt(env,owner,value){const iv=crypto.getRandomValues(new Uint8Array(12));const cipher=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:encode.encode(owner)},await key(env),encode.encode(JSON.stringify(value)));return {iv:b64(iv),cipher:b64(cipher)};}
 async function decrypt(env,owner,stored){try{return JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:bytes(stored.iv),additionalData:encode.encode(owner)},await key(env),bytes(stored.cipher))));}catch{throw new ReadingError(503,'settings_key_unreadable');}}
 export async function publicAISettings(env,owner){const saved=await record(env,owner);return saved?{...saved.public,has_key:true,configured:true,revision:saved.revision,tested_at:saved.tested_at}:defaults();}
-export async function effectiveAIEnv(env,owner,stub){const result=stub?await stub.call(owner,'getAISettings'):null;const saved=result?.ok?result.value:await record(env,owner);if(!saved)return env;const value=await decrypt(env,owner,saved);return {...env,AI_MODE:'model',AI_NAME:value.name,MODEL_API_URL:value.api_url,MODEL_API_KEY:value.api_key,MODEL_NAME:value.model,MODEL_PROVIDER:value.provider,MODEL_SYSTEM_PROMPT:value.system_prompt,MODEL_PERSONA:value.persona||''};}
+export async function effectiveAIEnv(env,owner,stub){const result=stub?await stub.call(owner,'getAISettings'):null;const saved=result?.ok?result.value:await record(env,owner);if(!saved)return env;const value=await decrypt(env,owner,saved);return {...env,AI_MODE:'model',AI_NAME:value.name,MODEL_API_URL:value.api_url,MODEL_API_KEY:value.api_key,MODEL_NAME:value.model,MODEL_PROVIDER:value.provider,MODEL_SYSTEM_PROMPT:value.system_prompt,MODEL_PERSONA:value.persona||'',MODEL_ALLOW_UPLOAD:value.allow_upload===true};}
 function validateURL(value){const url=new URL(endpoint(value));requireValue(!url.search && !/^(localhost|.*\.(?:localhost|local|internal))$/i.test(url.hostname) && !/^[\d.]+$/.test(url.hostname) && !url.hostname.includes(':'),'invalid_ai_endpoint');return url.href;}
 async function normalize(env,owner,input){
   requireValue(['deepseek','compatible'].includes(input.provider),'invalid_provider');
@@ -23,7 +23,7 @@ async function normalize(env,owner,input){
   let api_key=String(input.api_key||'').trim();
   if(!api_key){const saved=await record(env,owner);requireValue(saved,'api_key_required');api_key=(await decrypt(env,owner,saved)).api_key;}
   requireValue(api_key.length>0&&api_key.length<=4096&&!/[\r\n]/.test(api_key),'invalid_api_key');
-  return {provider:input.provider,api_url,model,name,system_prompt,persona,api_key};
+  return {provider:input.provider,api_url,model,name,system_prompt,persona,api_key,allow_upload:input.allow_upload===true||input.allow_upload==='on'};
 }
 async function fingerprint(value){return [...new Uint8Array(await crypto.subtle.digest('SHA-256',encode.encode(JSON.stringify(value))))].map(n=>n.toString(16).padStart(2,'0')).join('');}
 export async function probeAISettings(env,owner,input,fetchImpl=fetch){

@@ -3,6 +3,15 @@ import assert from 'node:assert/strict';
 import { runModel,endpoint } from '../src/core/model-adapter.mjs';
 const env={MODEL_API_URL:'https://model.example.test/chat',MODEL_API_KEY:'fixture-key',MODEL_NAME:'fixture'};
 const payload={book:{title:'示例'},discussion:{topic:'讨论'},user_message:{text:'怎么看？'},source_link:'reading://source/thread_a/doc_a'};
+test('model receives the reader ID and username as discussion data',async()=>{
+  const reader={user_id:'alice',username:'海边读者'};
+  await runModel({env,payload:{...payload,reader},fetchImpl:async(url,init)=>{
+    const messages=JSON.parse(init.body).messages;
+    const context=JSON.parse(messages.find(item=>item.content.startsWith('当前共读资料')).content.split('\n').slice(1).join('\n'));
+    assert.deepEqual(context.reader,reader);
+    return Response.json({choices:[{message:{content:'你好，海边读者。'}}]});
+  }});
+});
 test('model tools read only the host-scoped source and preserve tool call identity',async()=>{
   const bodies=[];let sourceCalls=0;
   const result=await runModel({env,payload,history:[{author:'me',text:'上一句话'}],readSource:async(start,limit)=>{sourceCalls++;assert.equal(start,3);assert.equal(limit,20);return {text:'示例原文'};},fetchImpl:async(url,init)=>{

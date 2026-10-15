@@ -16,7 +16,12 @@ export default {
       if(path==='/api/ai-settings'||path==='/api/ai-settings/test')return handleAISettings(request,env,await principalFor(request,env));
       if(path==='/api/topic-schedule')return handleSchedule(request,env,await principalFor(request,env));
       if(path==='/api/session') {
-        if(request.method==='GET'){const principal=await principalFor(request,env);return principal?json(principal):json({error:'unauthorized'},401);}
+        if(request.method==='GET'){
+          const principal=await principalFor(request,env);
+          if(!principal)return json({error:'unauthorized'},401);
+          const profile=await env.READING_LIBRARY.getByName(`reading-island:v1:owner:${principal.user_id}`).call(principal.user_id,'getProfile');
+          return profile.ok?json({...principal,...profile.value}):json({error:profile.error},profile.status);
+        }
         const origin=request.headers.get('origin');
         if((origin&&origin!==url.origin)||request.headers.get('sec-fetch-site')==='cross-site')return json({error:'cross_origin_forbidden'},403);
         if(request.method==='DELETE')return json({ok:true},200,{'Set-Cookie':'reading_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0'});

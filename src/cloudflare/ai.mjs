@@ -54,7 +54,9 @@ export async function dispatchReadingTurn(env,stub,turnId,owner,origin,fetchImpl
     if(mode==='mock') text=`**演示回复（Mock）**\n\n我们正在讨论《${payload.book.title}》中的“${payload.discussion.topic}”。\n\n${payload.source ? '> '+payload.source.exact+'\n\n' : ''}你刚才说：${payload.user_message.text}\n\n这是用于验证接线的模拟回复。配置自己的 AI 后，就可以继续真实共读。`;
     else if(mode==='model') {
       const history=await stub.call(owner,'modelHistory',{turn_id:turnId});
-      text=await runModel({env,payload,history:history.ok?history.value:[],fetchImpl,readSource:async(start,limit)=>{
+      const thread=await stub.call(owner,'get',{kind:'thread',id:payload.thread_id});
+      const uploadAllowed=(env.MODEL_ALLOW_UPLOAD===true||env.MODEL_ALLOW_UPLOAD==='true')&&thread.ok&&!thread.value.scheduled;
+      text=await runModel({env,payload,history:history.ok?history.value:[],fetchImpl,...(uploadAllowed?{addBook:async args=>{const result=await stub.call(owner,'modelAddBook',{...args,turn_id:turnId});if(!result.ok)throw new Error('Book upload rejected');return result.value;}}:{}),readSource:async(start,limit)=>{
         const result=await stub.call(owner,'gatewaySource',sourceInput(payload,start,limit));
         if(!result.ok)throw new Error('Source unavailable');return result.value;
       }});

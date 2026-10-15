@@ -4,6 +4,7 @@
 
 | 请求 | 行为 |
 | --- | --- |
+| GET/PATCH `/profile` | 本人的登录资料 `user_id,username,revision`；PATCH 仅接收 `username`（1–60字符）和当前 revision，不能改用户 ID |
 | GET `/{groups,books,documents,annotations,threads,messages}` | 游标分页；`after`、`limit`（默认50/最多100），可筛选 `book_id`；messages 可筛选 `thread_id` |
 | GET `/{resource}/{id}` | 单条读取 |
 | POST `/{groups,books,annotations,threads}` | 创建，稳定 id 支持同请求幂等重试 |
@@ -24,9 +25,11 @@
 
 错误返回 `{ "error": "code" }`：401 未登录、403 无权限/跨源、404 不存在、409 版本/幂等/摘录冲突、413 超限、415 格式、503 未配置/暂不可用。修改时使用返回的 revision；冲突后刷新，不覆盖其他客户端修改。
 
+网页首次导入时，POST `/books` 可附 `import_document_id`：书籍先作为隐藏预约保存，只有该文档完成冻结上传后才原子出现在书架。失败时可用原 book/document ID 和相同内容重试；换文档 ID 返回409。已有不带此字段的 Agent 创建/上传保持原行为。文档 PUT 的成功响应附 `book_snapshot`，包含该上传后书籍的当前资料与 revision，客户端无需依赖后续列表读取来确认保存结果。
+
 ## 格式边界
 
-AI设置另有：GET `/api/ai-settings`（无Key正文），POST `/api/ai-settings/test`（provider/api_url/model/api_key/name/system_prompt/persona），PUT `/api/ai-settings`（相同字段+proof+revision）。persona最多12000字符，为模型在议题资料之前收到的人物预设。只允许已登录读者访问，写入拒绝跨源；空api_key表示沿用本人已保存的Key。test使用小型合成内容调用所填服务，返回短时测试凭据；save校验当前配置及用户，未测试或更改配置返回409。测试会使用所填服务的余额，不自动重试。
+AI设置另有：GET `/api/ai-settings`（无Key正文），POST `/api/ai-settings/test`（provider/api_url/model/api_key/name/system_prompt/persona/allow_upload），PUT `/api/ai-settings`（相同字段+proof+revision）。persona最多12000字符，为模型在议题资料之前收到的人物预设。只允许已登录读者访问，写入拒绝跨源；空api_key表示沿用本人已保存的Key。test使用小型合成内容调用所填服务，返回短时测试凭据；save校验当前配置及用户，未测试或更改配置返回409。测试会使用所填服务的余额，不自动重试。
 
 定时设置：GET/PUT `/api/topic-schedule`，仅读者本人可读写。字段 `enabled,frequency:daily/weekly,time:HH:mm,weekday:0..6,timezone,scope:all/reading/group/books,group_id,book_ids,instruction,revision`；空group_id表示堆放。返回 `next_run`（UTC毫秒）和最近 `runs`。启用需已配置AI及有效书籍范围，revision冲突返回409；暂停删除后端闹钟。执行语义见[定时议题](TOPIC-SCHEDULE.md)。
 

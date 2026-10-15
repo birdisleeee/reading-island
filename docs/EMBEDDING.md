@@ -19,6 +19,8 @@ const token = await issueToken(sessionSecret, {
 
 不同签名 `user_id` 对应不同 DO/R2 数据空间。参考后端不提供注册、用户管理和租户控制台，这些由宿主负责。
 
+`GET /api/session` 返回当前已验证的 `user_id`、`username` 和资料 revision。读者可通过 `GET/PATCH /api/reading/profile` 查看或更新自己的用户名；宿主也可在可信服务端使用该用户的签名会话初始化用户名。用户 ID 始终取自鉴权，不接受浏览器正文改写。独立密码登录仍对应一个固定用户（默认 reader），不是输入不同名字就注册多个账号。电脑左下角显示登录资料，原返回宿主的跳转仍由页面返回行为和 returnUrl 配置控制。
+
 ## 显示配置
 
 后端 `AI_NAME` 决定回复作者的显示名，`THEME_ACCENT` 提供首次进入时的默认强调色。用户已保存的本地美化主题优先，并按对比度选取按钮前景色；`/api/config`仍提供 accent/accentText 供宿主使用。默认返回共读首页。若要返回宿主，修改 `/api/config` 的 `returnUrl`，只允许服务端白名单内的同源路径；不要接收用户提供的任意跳转 URL。

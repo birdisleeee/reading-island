@@ -17,6 +17,13 @@ export async function handleReadingApi(request, env, principal) {
     const stub = env.READING_LIBRARY.getByName(`reading-island:v1:owner:${owner}`);
     const segments = url.pathname.slice('/api/reading/'.length).split('/');
     const [resource, id, action] = segments;
+    if (resource === 'profile' && segments.length === 1) {
+      requireValue(principal.role === 'reader', 'forbidden', 403);
+      requireValue(['GET', 'PATCH'].includes(request.method), 'method_not_allowed', 405);
+      const body = request.method === 'PATCH' ? await readJson(request) : {};
+      const result = await stub.call(owner, request.method === 'PATCH' ? 'putProfile' : 'getProfile', { username: body.username, revision: body.revision });
+      return result.ok ? reply(result.value) : reply({error: result.error}, result.status);
+    }
     if (resource === 'unread' && segments.length === 1 && request.method === 'GET') {
       requireValue(principal.role === 'reader', 'forbidden', 403);
       const result = await stub.call(owner, 'unread', {});
@@ -79,6 +86,11 @@ export async function handleReadingApi(request, env, principal) {
     if (bird && operation === 'createThread') operation = 'createAssistantThread';
     const result = await stub.call(owner, operation, input);
     if (!result.ok) return reply({ error: result.error }, result.status);
+    if (operation === 'upload') {
+      // Include the book revision changed by this upload in its confirmed receipt.
+      const book = await stub.call(owner, 'get', { kind: 'book', id: input.book_id });
+      return reply({ ...result.value, ...(book.ok ? { book_snapshot: book.value } : {}) });
+    }
     if (operation === 'createThread') {
       const dispatch = await dispatchReadingTurn(env, stub, result.value.opening_turn_id, owner, url.origin);
       const latest = await stub.call(owner, 'get', { kind: 'thread', id: result.value.thread_id });

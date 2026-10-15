@@ -92,6 +92,7 @@ export class ReadingLibraryDO extends DurableObject {
     const fingerprint = JSON.stringify({ bookId, filename, originalSha });
     const reservation = this.ctx.storage.transactionSync(() => {
       const book = this.#get('book', bookId), previous = this.#get('document', documentId, false);
+      requireValue(!book.import_document_id || book.import_document_id === documentId, 'import_document_mismatch', 409);
       if (previous) { requireValue(previous.upload_fingerprint === fingerprint, 'idempotency_conflict', 409); return previous; }
       const version = (book.last_reserved_version || 0) + 1;
       this.#put('book', bookId, { ...book, last_reserved_version: version });
@@ -105,7 +106,7 @@ export class ReadingLibraryDO extends DurableObject {
       if (current.status === 'ready') return current;
       const ready = this.#put('document', documentId, { ...current, status: 'ready' });
       // A slower older upload cannot make the latest book version go backwards.
-      if ((book.current_version || 0) < ready.version) this.#put('book', bookId, { ...book, current_document_id: documentId, current_version: ready.version, revision: book.revision + 1 });
+      if ((book.current_version || 0) < ready.version) this.#put('book', bookId, { ...book, ...(book.import_document_id === documentId ? { archived: false, import_document_id: null } : {}), current_document_id: documentId, current_version: ready.version, revision: book.revision + 1 });
       return ready;
     });
   }
@@ -122,7 +123,51 @@ export class ReadingLibraryDO extends DurableObject {
     return this.#create('annotation', annotationId, { annotation_id: annotationId, book_id: bookId, document_id: doc.document_id, document_version: doc.version, text_sha256: doc.text_sha256, anchor: { start, end, exact: range.text }, insight: text(input.insight, 10000, true), purpose: input.purpose === 'discussion' ? 'discussion' : 'excerpt' });
   }
 
+  async #modelAddBook(owner,input){
+    const settings=this.#get('settings','ai',false),allowed=settings?settings.public.allow_upload===true:this.env.MODEL_ALLOW_UPLOAD==='true';
+    requireValue(allowed,'model_upload_not_allowed',403);
+    const turn=this.#get('turn',identity(input.turn_id)),thread=this.#get('thread',turn.thread_id);
+    requireValue(turn.status==='dispatching'&&!thread.scheduled,'model_upload_not_allowed',403);
+    requireValue(Object.keys(input).every(key=>['turn_id','title','author','content','format'].includes(key)),'invalid_upload_input');
+    const title=text(input.title,300),author=text(input.author,200,true),content=text(input.content,100000),format=input.format||'txt';
+    requireValue(['txt','md'].includes(format),'unsupported_document_format',415);
+    const fingerprint=await digest(new TextEncoder().encode(JSON.stringify({title,author,content,format})));
+    const id='model_'+(await digest(new TextEncoder().encode(owner+'\0'+turn.turn_id))).slice(0,40),bookId=id+'_book',documentId=id+'_doc';
+    const reservation=this.ctx.storage.transactionSync(()=>{
+      const old=this.#get('model_upload',id,false);
+      if(old){requireValue(old.fingerprint===fingerprint,'idempotency_conflict',409);return old;}
+      this.#create('book',bookId,{book_id:bookId,...this.#bookFields({title,author}),created_by:'assistant',archived:true,current_document_id:null,current_version:0});
+      return this.#put('model_upload',id,{book_id:bookId,document_id:documentId,fingerprint,status:'uploading'});
+    });
+    if(reservation.status==='ready')return reservation.result;
+    // Hidden reservation prevents an incomplete R2 upload appearing as an empty book.
+    const doc=await this.#upload(owner,{book_id:bookId,document_id:documentId,filename:'text.'+format,bytes:new TextEncoder().encode(content)});
+    return this.ctx.storage.transactionSync(()=>{
+      const book=this.#get('book',bookId),result={book_id:bookId,document_id:doc.document_id,title,format,created:true};
+      this.#put('book',bookId,{...book,archived:false});this.#put('model_upload',id,{...reservation,status:'ready',result});return result;
+    });
+  }
+
+  #readerProfile(owner) {
+    const profile = this.#get('settings', 'profile', false);
+    return { user_id: owner, username: profile?.username || owner, revision: profile?.revision || 0 };
+  }
+
+  #readerIdentity(owner) {
+    const { user_id, username } = this.#readerProfile(owner);
+    return { user_id, username };
+  }
+
   async #execute(owner, operation, input) {
+    if (operation === 'getProfile') return this.#readerProfile(owner);
+    if (operation === 'putProfile') return this.ctx.storage.transactionSync(() => {
+      const old = this.#readerProfile(owner);
+      requireValue(input.revision === old.revision, 'revision_conflict', 409);
+      const username = text(input.username, 60).trim();
+      requireValue(!/[\u0000-\u001f\u007f]/.test(username), 'invalid_username');
+      this.#put('settings', 'profile', { username, revision: old.revision + 1 });
+      return this.#readerProfile(owner);
+    });
     if(operation==='getSchedule')return this.#scheduleView();
     if(operation==='putSchedule'){
       let value;try{value=normalizeSchedule(input);}catch(error){throw new ReadingError(400,error.message);}
@@ -168,7 +213,7 @@ export class ReadingLibraryDO extends DurableObject {
       requireValue(name !== '堆放' && !duplicate, 'group_name_exists', 409);
       return this.#create('group', groupId, { group_id: groupId, name });
     });
-    if (operation === 'createBook') return this.#create('book', identity(input.book_id), { book_id: input.book_id, ...this.#bookFields(input), ...(input.created_by === 'assistant' ? {created_by:'assistant'} : {}), current_document_id: null, current_version: 0 });
+    if (operation === 'createBook') return this.#create('book', identity(input.book_id), { book_id: input.book_id, ...this.#bookFields(input), ...(input.created_by === 'assistant' ? {created_by:'assistant'} : {}), ...(input.import_document_id ? { import_document_id: identity(input.import_document_id), archived: true } : {}), current_document_id: null, current_version: 0 });
     if (operation === 'readingProgress') return this.ctx.storage.transactionSync(() => {
       const doc = this.#get('document', identity(input.document_id));
       requireValue(doc.status === 'ready' && Number.isSafeInteger(input.start) && doc.chapters.some(chapter => chapter.start === input.start), 'invalid_chapter');
@@ -231,6 +276,7 @@ export class ReadingLibraryDO extends DurableObject {
       return this.#put('thread', thread.thread_id, { ...thread, status: input.status, revision: thread.revision + 1 });
     });
     if (operation === 'upload') return this.#upload(owner, input);
+    if (operation === 'modelAddBook') return this.#modelAddBook(owner,input);
     if (operation === 'source') {
       requireValue(Number.isSafeInteger(input.start) && input.start >= 0 && Number.isSafeInteger(input.limit) && input.limit > 0 && input.limit <= 4000, 'invalid_range');
       const doc = this.#get('document', input.document_id);
@@ -247,7 +293,7 @@ export class ReadingLibraryDO extends DurableObject {
       const doc = thread.document_id ? this.#get('document', thread.document_id) : null;
       requireValue(!doc || (doc.book_id === book.book_id && doc.status === 'ready'), 'document_unavailable', 404);
       requireValue(!annotation || (annotation.book_id === book.book_id && annotation.document_id === doc?.document_id && annotation.document_version === doc.version), 'source_mismatch', 409);
-      return { protocol: 'reading-context-v1', thread_id: thread.thread_id, session_id: thread.session_id,
+      return { protocol: 'reading-context-v1', reader: this.#readerIdentity(owner), thread_id: thread.thread_id, session_id: thread.session_id,
         book: { book_id: book.book_id, title: book.title, author: book.author }, discussion: { topic: thread.title, status: thread.status },
         source: annotation ? { annotation_id: annotation.annotation_id, document_id: doc.document_id, document_version: doc.version, ...annotation.anchor, insight: annotation.insight } : null,
         source_link: doc?.parse_status === 'ready' ? `reading://source/${thread.thread_id}/${doc.document_id}?version=${doc.version}&sha=${doc.text_sha256}` : null };
@@ -310,7 +356,7 @@ export class ReadingLibraryDO extends DurableObject {
       requireValue(!doc || (doc.book_id === book.book_id && doc.status === 'ready'), 'document_unavailable', 404);
       const source = annotation ? { annotation_id: annotation.annotation_id, document_id: doc.document_id, document_version: doc.version, exact: annotation.anchor.exact, insight: annotation.insight } : null;
       const sourceLink = doc?.parse_status === 'ready' ? `reading://source/${thread.thread_id}/${doc.document_id}?version=${doc.version}&sha=${doc.text_sha256}` : null;
-      const payload = { protocol: 'reading-turn-v1', thread_id: thread.thread_id, turn_id: turn.turn_id, delivery_id: turn.delivery_id, book: { title: book.title, author: book.author }, discussion: { topic: thread.title, status: thread.status, ...(thread.created_by === 'assistant' ? {assistant_opening:thread.opening} : {}) }, source, source_link: sourceLink, user_message: { message_id: message.message_id, text: message.text } };
+      const payload = { protocol: 'reading-turn-v1', reader: this.#readerIdentity(owner), thread_id: thread.thread_id, turn_id: turn.turn_id, delivery_id: turn.delivery_id, book: { title: book.title, author: book.author }, discussion: { topic: thread.title, status: thread.status, ...(thread.created_by === 'assistant' ? {assistant_opening:thread.opening} : {}) }, source, source_link: sourceLink, user_message: { message_id: message.message_id, text: message.text } };
       this.#put('turn', turn.turn_id, { ...turn, dispatch_payload: payload });
       return { turn, payload };
     }

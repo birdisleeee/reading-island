@@ -1,11 +1,16 @@
-import { readingConfig } from './badge-appearance.mjs';
+import {cropImage} from './image-cropper.mjs';
+import { getSession } from './session.mjs';
+import {createEditSessions} from './edit-session.mjs';
 // Desktop presentation and device-local artwork only. Book data continues through
 // the existing reading API; this module never writes books, notes or discussions.
 const desktop = matchMedia('(min-width:641px)');
 const app = document.getElementById('app');
 const root = document.documentElement;
-let rail, dialog, picker, imageUrl = '', groups = [], frame = 0, generation = 0;
-let homeLayer = null;
+let rail, dialog, picker, imageUrl = '', artwork=null, artSize=100, groups = [], frame = 0, generation = 0;
+let homeLayer = null,librarySummary=null;
+let artEdits,artVersion=0,artSaves=Promise.resolve();
+document.addEventListener('reading-library-summary',event=>{librarySummary=event.detail;schedule();});
+document.addEventListener('reading-session',schedule);
 const escape = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fonts = {system:'-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif',rounded:'ui-rounded,"PingFang SC","Microsoft YaHei",sans-serif',mono:'"DM Mono",ui-monospace,monospace',serif:'"Noto Serif SC","Songti SC",serif'};
 const request = req => new Promise((resolve,reject) => {req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});
@@ -18,13 +23,14 @@ function openAppearanceDb(){
 }
 async function loadAppearance(){
   if(!desktop.matches)return;
-  const run=++generation;
+  const run=++generation,version=artVersion;
   let db;
   try{
     db=await openAppearanceDb();
     const tx=db.transaction('configs');
     const art=await request(tx.objectStore('configs').get('desktop-reading-hero'));
-    if(run!==generation||!desktop.matches)return;
+    if(run!==generation||!desktop.matches||version!==artVersion)return;
+    artwork=art?.blob?{blob:art.blob,source:art.source||art.blob,crop:art.crop}:null;artSize=art?.size||100;
     const next=art?.blob instanceof Blob?URL.createObjectURL(art.blob):'';
     if(imageUrl)URL.revokeObjectURL(imageUrl);imageUrl=next;
     schedule();
@@ -45,22 +51,30 @@ function refresh(){
   const wallpaper=layer?.style.backgroundImage||'none';
   if(rail.style.getPropertyValue('--desktop-reading-wallpaper')!==wallpaper)rail.style.setProperty('--desktop-reading-wallpaper',wallpaper);
   const sections=[...app.querySelectorAll('.shelf-section[data-group]')];
-  if(sections.length)groups=sections.map(section=>({name:section.dataset.group,count:section.querySelectorAll('.book-tile').length}));
+  if(librarySummary)groups=librarySummary.groups.map(name=>{const books=librarySummary.books.filter(book=>(book.category||'堆放')===name);return {name,count:books.length,unread:books.reduce((total,book)=>total+book.unread,0)};});else if(sections.length)groups=sections.map(section=>({name:section.dataset.group,count:section.querySelectorAll('.book-tile').length}));
   const current=app.dataset.view==='group'?app.querySelector('.group-head h1')?.textContent:'';
   const list=rail.querySelector('.reading-desktop-groups');
   const signature=JSON.stringify([groups,current]);
   if(list.dataset.signature!==signature){
     list.dataset.signature=signature;
-    list.innerHTML=groups.map(g=>`<button type="button" data-action="open-group" data-group="${escape(g.name)}" ${g.name===current?'aria-current="page"':''}><span>${escape(g.name)}</span><small>${g.count}</small></button>`).join('');
+    list.innerHTML=groups.map(g=>`<button type="button" data-action="open-group" data-group="${escape(g.name)}" ${g.name===current?'aria-current="page"':''}><span>${escape(g.name)}</span><span class="group-nav-meta"><small>${g.count}</small>${g.unread?`<span class="nav-unread" aria-label="${g.unread} 条未读消息">${g.unread>99?'99+':g.unread}</span>`:''}</span></button>`).join('');
   }
+  const shelfButton=rail.querySelector('[data-desktop-books]'),total=groups.reduce((value,group)=>value+(group.unread||0),0);shelfButton.querySelector('.nav-unread')?.remove();if(total){const badge=document.createElement('span');badge.className='nav-unread';badge.textContent=total>99?'99+':String(total);badge.setAttribute('aria-label',total+' 条未读消息');shelfButton.append(badge);}
   rail.querySelector('[data-desktop-books]').setAttribute('aria-current',app.dataset.view==='shelf'?'page':'false');
   rail.querySelector('[data-action="all-notes"]').setAttribute('aria-current',app.dataset.view==='notes'?'page':'false');
+  const identity=getSession(),account=rail.querySelector('[data-action="reader-profile"]');
+  account.hidden=!identity;
+  if(identity){
+    account.querySelector('[data-reader-name]').textContent=identity.username||identity.user_id;
+    account.querySelector('[data-reader-id]').textContent='ID · '+identity.user_id;
+    account.setAttribute('aria-label',`已登录：${identity.username||identity.user_id}，ID ${identity.user_id}，编辑登录资料`);
+  }
   const image=app.querySelector('.library-hero img');
   if(image){
     if(!image.dataset.desktopOriginalSrc)image.dataset.desktopOriginalSrc=image.getAttribute('src');
     const src=imageUrl||image.dataset.desktopOriginalSrc;
     if(image.getAttribute('src')!==src)image.setAttribute('src',src);
-    image.setAttribute('role','button');image.tabIndex=0;image.setAttribute('aria-label','替换共读岛插图');image.title='点击替换插图';
+    image.style.setProperty('--hero-size',artSize+'%');image.setAttribute('role','button');image.tabIndex=0;image.setAttribute('aria-label','替换共读岛插图');image.title='点击替换插图';
   }
 }
 function ensureDesktop(){
@@ -72,21 +86,25 @@ function ensureDesktop(){
   }
   if(!rail){
     rail=document.createElement('aside');rail.className='reading-desktop-rail';rail.setAttribute('aria-label','共读岛导航');
-    rail.innerHTML=`<div class="reading-desktop-brand">共读岛<small>READING ISLAND</small></div><nav><button type="button" data-desktop-books data-action="open-shelf">书架</button><button type="button" data-action="all-notes">全部札记</button></nav><div class="reading-desktop-group-heading">书籍分组</div><nav class="reading-desktop-groups"></nav><div class="reading-desktop-rail-foot"><button type="button" data-action="create-group">＋ 新建分组</button><button type="button" data-action="settings" data-desktop-settings>设置</button><a href="${escape(readingConfig.returnUrl)}">‹ 返回首页</a></div>`;
+    rail.innerHTML=`<div class="reading-desktop-brand">共读岛<small>READING ISLAND</small></div><nav><button type="button" data-desktop-books data-action="open-shelf">书架</button><button type="button" data-action="all-notes">全部札记</button></nav><div class="reading-desktop-group-heading">书籍分组</div><nav class="reading-desktop-groups"></nav><div class="reading-desktop-rail-foot"><button type="button" data-action="manage-groups"><span>管理分组</span><span class="group-manage-add" aria-hidden="true">＋</span></button><button type="button" data-action="settings" data-desktop-settings>设置</button><button type="button" class="reader-account" data-action="reader-profile"><span class="reader-avatar" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="8" r="3.5"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/></svg></span><span class="reader-account-copy"><small class="reader-login-state">已登录</small><strong data-reader-name></strong><small data-reader-id></small></span></button></div>`;
     document.body.append(rail);
     dialog=document.createElement('dialog');dialog.className='reading-desktop-art-dialog';dialog.setAttribute('aria-labelledby','reading-art-title');
-    dialog.innerHTML='<h2 id="reading-art-title">替换共读岛插图？</h2><p>选择新图片后，会替换书架上方的插图。图片仅用于当前电脑的外观。</p><div class="reading-art-actions"><button type="button" data-art="reset">恢复默认图片</button><button type="button" data-art="cancel">取消</button><button type="button" data-art="choose" class="primary">选择图片</button></div>';
+    dialog.innerHTML='<h2 id="reading-art-title">替换共读岛插图？</h2><p>选择新图片后，会替换书架上方的插图。图片仅用于当前电脑的外观。</p><label class="art-size">插图显示大小<input type="range" min="40" max="100" step="1" aria-label="插图显示大小"><output></output></label><div class="reading-art-actions"><button type="button" data-art="adjust">调整裁剪</button><button type="button" data-art="reset">恢复默认图片</button><button type="button" data-art="cancel">取消</button><button type="button" data-art="save">保存大小</button><button type="button" data-art="choose" class="primary">选择图片</button></div>';
     document.body.append(dialog);
+    artEdits=createEditSessions({isOpen:()=>dialog.open&&desktop.matches,onSaving:busy=>{for(const button of dialog.querySelectorAll('[data-art=save],[data-art=reset]'))button.disabled=busy;},onSaved:job=>{const unchanged=job.unchanged();if(unchanged)dialog.close();notice(unchanged?'插图设置已保存':'已保存提交时的大小，后续调整尚未保存。');},onError:()=>notice('图片未能保存，请重试。')});
+    dialog.addEventListener('cancel',()=>{artVersion++;void loadAppearance();});
     picker=document.createElement('input');picker.type='file';picker.accept='image/png,image/jpeg,image/webp';picker.hidden=true;document.body.append(picker);
     dialog.addEventListener('click',event=>{
       const action=event.target.closest('[data-art]')?.dataset.art;
-      if(action==='cancel')dialog.close();
-      if(action==='choose'){dialog.close();picker.value='';picker.click();}
-      if(action==='reset')void saveArtwork(null).then(()=>{dialog.close();notice('已恢复默认插图');}).catch(()=>notice('图片未能保存，请重试。'));
+      if(action==='cancel'){artVersion++;dialog.close();void loadAppearance();}
+      if(action==='adjust'&&artwork){artVersion++;dialog.close();void editArtwork(artwork.source,artwork.crop).catch(error=>notice(error.message));}
+      if(action==='choose'){artVersion++;dialog.close();picker.value='';picker.click();}
+      if(action==='save')void artEdits.run(input=>saveArtwork(input.asset,input.size),()=>({asset:artwork,size:artSize}));
+      if(action==='reset')void artEdits.run(()=>{artSize=100;artVersion++;return saveArtwork(null,100);},()=>null);
     });
     picker.addEventListener('change',async()=>{
       const file=picker.files?.[0];if(!file||!desktop.matches)return;
-      try{const blob=await normalizeArtwork(file);if(!desktop.matches)return;await saveArtwork(blob);notice('插图已替换');}
+      try{await editArtwork(file);}
       catch(error){notice(error.message||'图片未能保存，请重试。');}
     });
     new MutationObserver(schedule).observe(app,{childList:true,subtree:true,attributes:true,attributeFilter:['data-view']});
@@ -97,24 +115,18 @@ function ensureDesktop(){
   }
   void loadAppearance();schedule();
 }
-function openReplace(){if(!dialog.open)dialog.showModal();}
+function openReplace(){artVersion++;artEdits.begin({});dialog.querySelector('[data-art=adjust]').disabled=!artwork;const input=dialog.querySelector('input');input.value=artSize;dialog.querySelector('output').textContent=artSize+'%';input.oninput=()=>{artVersion++;artEdits.touch();artSize=Number(input.value);dialog.querySelector('output').textContent=artSize+'%';schedule();};if(!dialog.open)dialog.showModal();}
+async function editArtwork(source,initial){const version=artVersion,asset=await cropImage(source,{title:'调整共读岛插图',aspect:310/180,initial});if(!asset||!desktop.matches||version!==artVersion)return;await saveArtwork(asset,artSize);notice('插图已替换');}
 function notice(text){const el=document.getElementById('toast');el.textContent=text;el.className='toast';setTimeout(()=>{el.className='';el.textContent='';},2400);}
-async function normalizeArtwork(file){
-  if(!/^image\/(png|jpeg|webp)$/.test(file.type)||file.size>8*1024*1024)throw new Error('请选择 8 MB 以内的 PNG、JPEG 或 WebP 图片。');
-  const bitmap=await createImageBitmap(file).catch(()=>{throw new Error('无法读取这张图片，请重新选择。');});
-  try{
-    if(!bitmap.width||!bitmap.height||bitmap.width*bitmap.height>100000000)throw new Error('图片尺寸过大，请选择较小的图片。');
-    const ratio=Math.min(1,1440/Math.max(bitmap.width,bitmap.height)),canvas=document.createElement('canvas');
-    canvas.width=Math.max(1,Math.round(bitmap.width*ratio));canvas.height=Math.max(1,Math.round(bitmap.height*ratio));
-    canvas.getContext('2d').drawImage(bitmap,0,0,canvas.width,canvas.height);
-    const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));if(!blob)throw new Error('无法保存这张图片，请重新选择。');return blob;
-  }finally{bitmap.close();}
-}
-async function saveArtwork(blob){
-  const db=await openAppearanceDb();
-  try{await new Promise((resolve,reject)=>{const tx=db.transaction('configs','readwrite');if(blob)tx.objectStore('configs').put({id:'desktop-reading-hero',blob});else tx.objectStore('configs').delete('desktop-reading-hero');tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});}
-  finally{db.close();}
-  await loadAppearance();
+async function saveArtwork(asset,size){
+  const version=artVersion;
+  const write=artSaves.then(async()=>{
+    const db=await openAppearanceDb();
+    try{await new Promise((resolve,reject)=>{const tx=db.transaction('configs','readwrite');tx.objectStore('configs').put({id:'desktop-reading-hero',...(asset||{}),size});tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});}
+    finally{db.close();}
+  });
+  artSaves=write.catch(()=>{});await write;
+  if(version===artVersion)await loadAppearance();
 }
 desktop.addEventListener('change',ensureDesktop);
 window.addEventListener('focus',()=>{if(desktop.matches)void loadAppearance();});
