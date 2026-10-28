@@ -111,6 +111,9 @@ dialog form { display: flex; flex-direction: column; max-height: min(82vh, 700px
 .file-list strong, .file-list small { display: block; }
 .file-list small { margin-top: 4px; color: var(--muted); font-size: 10px; }
 .file-list article > div:last-child { display: flex; align-items: center; }
+.file-list article > div:first-child { min-width: 0; }
+.file-list article > div:last-child { flex-shrink: 0; }
+.file-list [data-action="download-original"] { min-width: 44px; min-height: 44px; }
 .head-spacer { width: 36px; }
 .chapter-list { padding: 13px 16px 60px; display: grid; gap: 10px; }
 .chapter-card { width: 100%; min-height: 70px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid rgba(139,112,77,.16); border-radius: 16px; background: rgba(255,253,248,.9); padding: 12px 15px; text-align: left; box-shadow: 0 4px 12px rgba(63,43,22,.06); }

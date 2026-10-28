@@ -1,7 +1,9 @@
 let currentSession = null;
 export const getSession = () => currentSession;
 export function updateSession(profile) {
-  currentSession = { ...currentSession, ...profile };
+  const sameOwner=currentSession?.user_id===profile.user_id;
+  if(sameOwner&&Number.isSafeInteger(profile.revision)&&Number.isSafeInteger(currentSession.revision)&&profile.revision<currentSession.revision)return currentSession;
+  currentSession = { ...(sameOwner?currentSession:{}), ...profile, avatar_data:profile.avatar_data||'' };
   document.dispatchEvent(new CustomEvent('reading-session', { detail: currentSession }));
   return currentSession;
 }

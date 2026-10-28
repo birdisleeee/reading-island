@@ -8,7 +8,6 @@ import android.net.Uri;
 import android.net.http.SslError;
 import android.os.Build;
 import android.os.Bundle;
-import android.view.Gravity;
 import android.view.View;
 import android.view.WindowInsets;
 import android.webkit.CookieManager;
@@ -40,12 +39,15 @@ public final class MainActivity extends Activity {
     private LinearLayout errorPanel;
     private TextView errorText;
     private ValueCallback<Uri[]> chooser;
+    private AppUpdater updater;
     private String lastUrl = BASE_URL + "/app";
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         LinearLayout root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.rgb(239,236,243)); root.setFitsSystemWindows(true);
+        root.setBackgroundColor(Color.rgb(228,209,174)); root.setFitsSystemWindows(true);
+        getWindow().setStatusBarColor(Color.rgb(228,209,174));getWindow().setNavigationBarColor(Color.rgb(228,209,174));
+        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         if (Build.VERSION.SDK_INT >= 30) {
             getWindow().setDecorFitsSystemWindows(false);
             root.setOnApplyWindowInsetsListener((v,insets)->{
@@ -53,23 +55,27 @@ public final class MainActivity extends Activity {
                 v.setPadding(bars.left,bars.top,bars.right,bars.bottom); return insets;
             });
         }
-        LinearLayout toolbar=new LinearLayout(this); toolbar.setGravity(Gravity.CENTER_VERTICAL);
-        TextView title=new TextView(this); title.setText("共读岛"); title.setTextSize(17);title.setTextColor(Color.rgb(41,37,47));title.setPadding(dp(16),0,0,0);
-        toolbar.addView(title,new LinearLayout.LayoutParams(0,dp(48),1));
-        addButton(toolbar,"账户",()->web.loadUrl(BASE_URL+"/app"));
-        addButton(toolbar,"分享",this::share);
-        addButton(toolbar,"刷新",()->web.reload());root.addView(toolbar);
+        updater=new AppUpdater(this,BASE_URL);
         progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);root.addView(progress,new LinearLayout.LayoutParams(-1,dp(3)));
         errorPanel=new LinearLayout(this);errorPanel.setOrientation(LinearLayout.VERTICAL);errorPanel.setPadding(dp(22),dp(24),dp(22),dp(24));
         errorText=new TextView(this);errorText.setTextSize(16);errorPanel.addView(errorText);addButton(errorPanel,"重试",()->web.loadUrl(lastUrl));errorPanel.setVisibility(View.GONE);root.addView(errorPanel);
         web=new WebView(this);root.addView(web,new LinearLayout.LayoutParams(-1,0,1));setContentView(root);
+        web.setVerticalScrollBarEnabled(false);web.setHorizontalScrollBarEnabled(false);
         WebSettings settings=web.getSettings();settings.setJavaScriptEnabled(true);settings.setDomStorageEnabled(true);
+        settings.setUserAgentString(settings.getUserAgentString()+" ReadingIslandAndroid/"+updater.installedVersion());
         settings.setAllowFileAccess(false);settings.setAllowContentAccess(true);settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         settings.setJavaScriptCanOpenWindowsAutomatically(false);settings.setSupportMultipleWindows(false);settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setSafeBrowsingEnabled(true);CookieManager.getInstance().setAcceptCookie(true);CookieManager.getInstance().setAcceptThirdPartyCookies(web,false);
         WebView.setWebContentsDebuggingEnabled(false);
         web.setWebViewClient(new WebViewClient(){
-            @Override public boolean shouldOverrideUrlLoading(WebView v,WebResourceRequest r){return navigate(r.getUrl());}
+            @Override public boolean shouldOverrideUrlLoading(WebView v,WebResourceRequest r){
+                Uri uri=r.getUrl();
+                if(trusted(uri)&&"/native/check-update".equals(uri.getPath())){
+                    if(UpdatePolicy.checkLink(BASE_URL,uri.toString(),r.isForMainFrame(),r.hasGesture()))updater.check(true);
+                    return true;
+                }
+                return navigate(uri);
+            }
             @Override public void onPageStarted(WebView v,String url,android.graphics.Bitmap icon){if(trusted(Uri.parse(url))){lastUrl=url;errorPanel.setVisibility(View.GONE);web.setVisibility(View.VISIBLE);}progress.setVisibility(View.VISIBLE);}
             @Override public void onPageFinished(WebView v,String url){CookieManager.getInstance().flush();progress.setVisibility(View.GONE);}
             @Override public void onReceivedSslError(WebView v,SslErrorHandler h,SslError e){h.cancel();showError("无法验证服务连接，请检查网络、系统时间或稍后重试。");}
@@ -86,6 +92,7 @@ public final class MainActivity extends Activity {
         web.setDownloadListener((url,userAgent,disposition,mime,size)->download(url,userAgent,disposition,mime));
         // Do not restore login pages/forms or management URLs from Android backups or saved state.
         web.loadUrl(BASE_URL+"/app");
+        updater.check(false);
     }
     private void download(String url,String userAgent,String disposition,String mime){
         if(!trusted(Uri.parse(url)))return;
@@ -108,10 +115,9 @@ public final class MainActivity extends Activity {
     private void openExternal(Uri uri){try{startActivity(new Intent(Intent.ACTION_VIEW,uri));}catch(Exception e){showMessage("没有可打开此链接的应用");}}
     private void showMessage(String text){new AlertDialog.Builder(this).setMessage(text).setPositiveButton("知道了",null).show();}
     private void showError(String text){errorText.setText(text);errorPanel.setVisibility(View.VISIBLE);web.setVisibility(View.GONE);progress.setVisibility(View.GONE);}
-    private void share(){String url=web.getUrl();if(url==null||!trusted(Uri.parse(url)))return;String shared=BASE_URL+"/app";Intent intent=new Intent(Intent.ACTION_SEND);intent.setType("text/plain");intent.putExtra(Intent.EXTRA_TEXT,"共读岛："+shared);startActivity(Intent.createChooser(intent,"分享共读岛"));}
     @Override protected void onActivityResult(int req,int result,Intent data){super.onActivityResult(req,result,data);if(req!=PICK_IMAGE||chooser==null)return;Uri uri=result==RESULT_OK&&data!=null?data.getData():null;boolean ok=uri!=null&&"content".equals(uri.getScheme());chooser.onReceiveValue(ok?new Uri[]{uri}:null);chooser=null;if(uri!=null&&!ok)showMessage("请选择可读取的文件");}
     @Override public void onBackPressed(){if(web.canGoBack())web.goBack();else new AlertDialog.Builder(this).setMessage("退出共读岛？").setPositiveButton("退出",(d,w)->finish()).setNegativeButton("继续使用",null).show();}
-    @Override protected void onPause(){super.onPause();web.onPause();web.pauseTimers();CookieManager.getInstance().flush();}
-    @Override protected void onResume(){super.onResume();if(web!=null){web.onResume();web.resumeTimers();}}
-    @Override protected void onDestroy(){if(chooser!=null)chooser.onReceiveValue(null);if(web!=null){web.stopLoading();web.destroy();}super.onDestroy();}
+    @Override protected void onPause(){super.onPause();if(updater!=null)updater.pause();web.onPause();web.pauseTimers();CookieManager.getInstance().flush();}
+    @Override protected void onResume(){super.onResume();if(web!=null){web.onResume();web.resumeTimers();}if(updater!=null)updater.resume();}
+    @Override protected void onDestroy(){if(updater!=null)updater.close();if(chooser!=null)chooser.onReceiveValue(null);if(web!=null){web.stopLoading();web.destroy();}super.onDestroy();}
 }

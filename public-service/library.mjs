@@ -23,6 +23,7 @@ export class HostedReadingLibraryDO extends ReadingLibraryDO {
   }};
  }
  documentBucket(){return this.meteredBucket;}
+ readerLoginId(owner){return this.grant?.username||owner;}
  async readObject(owner,key){
   await this.refreshGrant(owner);
   const stored=this.ctx.storage.sql.exec('SELECT id FROM reading_owner LIMIT 1').toArray()[0];
@@ -38,6 +39,8 @@ export class HostedReadingLibraryDO extends ReadingLibraryDO {
  checkStorage(delta){if(!this.grant||this.usage().bytes+delta>this.grant.quota.bytes)throw new ReadingError(429,'storage_quota_exceeded');}
  beforeRecordWrite(kind,id,value){
   const old=this.ctx.storage.sql.exec('SELECT value FROM reading_records WHERE kind=? AND id=?',kind,id).toArray()[0];
+  // Releasing a task's reserved status space must still work after an operator lowers the quota.
+  if(kind==='catalog_job'&&old&&size(JSON.stringify(value))<=size(old.value))return;
   const used=this.usage();
   if(!old&&['book','thread'].includes(kind)&&used[kind==='book'?'books':'threads']>=this.grant.quota[kind==='book'?'books':'threads'])throw new ReadingError(429,'record_quota_exceeded');
   this.checkStorage(size(JSON.stringify(value))-(old?size(old.value):0)+(old?0:256));

@@ -2,9 +2,9 @@
 
 本实现使用 Worker 提供 API、SQLite Durable Objects 保存元数据和讨论、R2 保存书籍原件及冻结文本；静态 UI 随 Worker assets 部署。其他后端需适配 [API](API.md)，不要求复制 Cloudflare 存储实现。
 
-普通使用者优先阅读 [浏览器部署流程](START-HERE.md)，或让自己的 LLM 按 [操作指引](LLM-DEPLOY-GUIDE.md)教学。下方保留命令行备用流程。
+安装自己的实例，优先阅读 [浏览器部署流程](START-HERE.md)，或让自己的 LLM 按 [操作指引](LLM-DEPLOY-GUIDE.md)教学。直接使用制作者的网页 / APK 请看 [普通用户说明](USER-GUIDE.md)，已有 Agent 请看 [接入手册](AGENT-GUIDE.md)。下方保留命令行备用流程。
 
-定时共读使用同一ReadingLibraryDO的Alarm，无需新增Cron/binding或改既有migration。更新自己的实例到新版后，可在“设置 → 议题设置”启用；默认暂停。见[定时说明](TOPIC-SCHEDULE.md)。
+定时共读使用同一ReadingLibraryDO的Alarm，无需新增Cron/binding或改既有migration。更新自己的实例到新版后，可在“设置 → 议题定时”启用；默认暂停。见[定时说明](TOPIC-SCHEDULE.md)。
 
 ## 本地
 
@@ -24,7 +24,7 @@ npx wrangler secret put READER_TOKEN
 npx wrangler secret put SESSION_SECRET
 ```
 
-已有 Agent 接线还需 `npx wrangler secret put AI_SHARED_SECRET`。模型 API 接线还需 `npx wrangler secret put MODEL_API_KEY`。
+已有 Agent 接线还需 `npx wrangler secret put AI_SHARED_SECRET`。仅在使用服务端环境变量配置模型 API 时，才需 `npx wrangler secret put MODEL_API_KEY`；通过网页填 Key 的用户无需设置这个 Secret。
 
 登录的 `READER_TOKEN` 是本实例默认读者访问密码。`SESSION_SECRET` 签发 HttpOnly 会话 Cookie，应该独立于密码和 Agent 密钥。推荐使用密码管理器生成至少 32 字符随机值。示例文件中的本地值不能用于线上。
 

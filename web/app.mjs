@@ -2,19 +2,26 @@ import {dismissOnOutside} from './dialog-behavior.mjs';
 import {createEditSessions} from './edit-session.mjs';
 import {mergeThread, mergeLibraryThreads, captureDialogReturnFocus} from './confirmed-state.mjs';
 import { syncIslandBadgeAppearance, readingConfig,refreshReadingConfig } from './badge-appearance.mjs';
-import { ensureSession, updateSession } from './session.mjs';
+import { ensureSession, updateSession, getSession } from './session.mjs';
 import {openAISettings} from './ai-settings.mjs';
+import {openBookCatalog} from './book-catalog.mjs';
+import {readerProfileView} from './reader-profile-view.mjs';
+import {bindReaderAvatarEditor} from './reader-avatar-editor.mjs';
+import {readerAvatarContent} from './reader-avatar-view.mjs';
+import {startupView,prepareInitialArtwork} from './startup-view.mjs';
+import {mountReaderControls} from './reader-controls.mjs';
 import {initAppearance,applyAppearance,collapsedGroups,toggleGroup} from './appearance.mjs';
-import {openSettings,openAppearance} from './settings.mjs';
-await loadAtStartup(ensureSession, '暂时无法连接共读岛，请检查网络后重试。');
+import {openSettings,openAppearance,openAccountSettings} from './settings.mjs';
+const startupProfile=await loadAtStartup(ensureSession, '暂时无法连接共读岛，请检查网络后重试。');
+document.querySelector('#app').innerHTML=startupView(startupProfile,'正在打开你的书架…');
 await loadAtStartup(refreshReadingConfig, '暂时无法读取共读岛配置，请重试。');
 await initAppearance();
-await import('./desktop.mjs');
+const {initialDesktopArtwork}=await import('./desktop.mjs');
 await import('./artwork.mjs');
 import { groupDiscussionMessages } from './discussion-messages.mjs';
 import { renderMarkdown } from './markdown.mjs';
 import { createAnnotation, createBook, createThreadMessage, makeAnchor, makeDocument, openDatabase, readSnapshot, resolveAnnotation, saveSnapshot } from './model.mjs';
-import { btn, drawNote, groupView, icon, journalView, shelfView } from './visual.mjs';
+import { btn, drawNote, groupView, icon, journalView,updateJournalView, shelfView,updateShelfView,captureChapterDirectory,restoreChapterDirectory,jumpToReadChapter } from './visual.mjs';
 import { detectChapterRanges, detectFormat, FORMAT_ACCEPT, formatLabel, normalizeChapterRanges } from '../src/core/document-formats.mjs';
 
 void syncIslandBadgeAppearance();
@@ -46,8 +53,7 @@ async function loadAtStartup(load, message) {
     catch {
       // Keep failures distinct from a successfully loaded empty library.
       const root = document.querySelector('#app');
-      root.innerHTML = '<section class="empty startup-recovery"><h1>共读岛</h1><p role="status"></p><button class="primary" type="button">重新加载</button></section>';
-      root.querySelector('[role="status"]').textContent = message;
+      root.innerHTML = startupView(getSession(),message,true);
       const button = root.querySelector('button');
       await new Promise(resolve => button.addEventListener('click', resolve, { once: true }));
       button.disabled = true;
@@ -85,6 +91,9 @@ let suppressBookClick = false;
 const $ = (selector, root = document) => root.querySelector(selector);
 const app = $('#app');
 const sheet = $('#sheet');
+let profileAvatarEditor;
+let readerControls;
+let initialCoverPass=true;
 dismissOnOutside(sheet);
 const edits = createEditSessions({
   isOpen: () => sheet.open,
@@ -94,7 +103,7 @@ const edits = createEditSessions({
     // but don't allow a second payload under the same creation identity.
     $('#sheet-body').inert = busy && !['edit-book', 'reader-profile'].includes(sheet.dataset.mode);
     const submit = $('#sheet-actions [type="submit"]');
-    if (submit) submit.disabled = busy;
+    if (submit) submit.disabled = busy || sheet.dataset.avatarBusy === 'true';
   },
   onSaved: job => {
     if (job.unchanged()) { sheet.close(); job.returnFocus?.(); }
@@ -117,7 +126,10 @@ if (history.state?.readingNav) {
   navigate('thread', {}, restoredThread.thread_id);
 }
 history.replaceState({ readingNav: navState(), readingStack: navigationStack }, '', location.href);
+const initialCovers=cloud?cloud.loadCovers(state,paintCover).then(()=>state.books.slice(0,12).map(book=>book.cover_data)):[];
+await prepareInitialArtwork(['/reading-island/assets/reading-cluster.svg','/reading-island/assets/default-cover.svg',initialDesktopArtwork,initialCovers,...['--theme-image','--reader-image'].map(key=>document.documentElement.style.getPropertyValue(key).match(/^url\(["']?(.*?)["']?\)$/)?.[1])]);
 render();
+delete document.body.dataset.readingStarting;
 if (restoredThread) pollThread(restoredThread.thread_id);
 
 async function commit(next) {
@@ -140,6 +152,24 @@ async function commit(next) {
   await saveSnapshot(db, next, expected);
   state = next;
   render();
+}
+
+const shelfRefreshedTurns=new Map();
+function refreshShelfAfterTurn(thread){
+  if(!cloud)return;
+  const turn=thread.latest_turn_id||thread.opening_turn_id;
+  if(!turn||shelfRefreshedTurns.get(thread.thread_id)===turn)return;
+  shelfRefreshedTurns.set(thread.thread_id,turn);
+  const generation=libraryWriteGeneration;
+  void cloud.load({shelfOnly:true}).then(snapshot=>{
+    if(generation!==libraryWriteGeneration)return;
+    const changed=JSON.stringify(state.books)!==JSON.stringify(snapshot.books)||JSON.stringify(state.group_records)!==JSON.stringify(snapshot.group_records);
+    if(!changed)return;
+    libraryWriteGeneration++;
+    state={...state,books:snapshot.books,groups:snapshot.groups,group_records:snapshot.group_records};
+    cloudDetailsLoaded=false;paintUnreadBadges();
+    if(view==='shelf'||view==='group')render();
+  }).catch(()=>{/* A later explicit reload can recover the shelf without repeating a model request. */});
 }
 
 async function pollThread(threadId) {
@@ -168,7 +198,7 @@ async function pollThread(threadId) {
       if (status) app.querySelector('.messages')?.after(status);
       if (followLatest) scroller.scrollTop = scroller.scrollHeight;
       void acknowledgeDiscussion();
-      if (!activeDeliveryStatuses.has(thread.delivery_status)) return;
+      if (!activeDeliveryStatuses.has(thread.delivery_status)) { refreshShelfAfterTurn(thread); return; }
     } catch {
       if (attempt === 39) toast('回复状态暂时无法刷新，可以稍后重新打开讨论。');
     }
@@ -209,30 +239,40 @@ function returnToBookTab(tab) {
 }
 
 function render() {
+  readerControls?.dispose();readerControls=null;
   const previousView = app.dataset.view;
   const previousScroll = app.querySelector('.thread-scroll')?.scrollTop;
-  if (view === 'shelf') app.innerHTML = shelfView(state.books, state.groups, shelfSearch, menuOpen,collapsedGroups());
-  if(view==='shelf'){
-    const entry=document.createElement('button');entry.type='button';entry.className='ai-setup-entry';entry.dataset.action='ai-settings';
-    entry.dataset.action='settings';entry.textContent='设置';
-    app.querySelector('.search-box').after(entry);
+  const previousDirectory = captureChapterDirectory(app);
+  if (view === 'shelf') updateShelfView(app,shelfView(state.books, state.groups, shelfSearch, menuOpen,collapsedGroups()));
+  const existingReminder=app.querySelector('.ai-connect-reminder');
+  if(view==='shelf'&&!readingConfig.aiConfigured&&!existingReminder){
+    const reminder=document.createElement('div');reminder.className='ai-connect-reminder';
+    reminder.innerHTML='<span>先连接自己的 AI，再开始一起读书。</span><button type="button" data-action="ai-settings">去接入 AI →</button>';
+    app.querySelector('.library-hero').after(reminder);
   }
+  if(view==='shelf'&&readingConfig.aiConfigured)existingReminder?.remove();
   if (view === 'group') app.innerHTML = groupView(state.books, groupName);
-  if (view === 'journal') app.innerHTML = journalView(currentBook(), bookNotes(), state.threads, journalTab, currentDoc());
+  if (view === 'journal') updateJournalView(app,journalView(currentBook(), bookNotes(), state.threads, journalTab, currentDoc()));
   if (view === 'journal') app.append(app.querySelector('.journal-bottom'));
+  if (view === 'journal' && journalTab === 'original') restoreChapterDirectory(app, currentDoc(), previousDirectory);
   if (view === 'reader') app.innerHTML = readerView();
   if (view === 'notes') app.innerHTML = notesView();
   if (view === 'thread') app.innerHTML = threadView();
   if (view === 'reader') paintReader();
   app.dataset.view = view;
+  if(view==='reader')readerControls=mountReaderControls(app.querySelector('.reader-screen'));
   syncDiscussionViewport();
   if (view === 'thread' && previousView === 'thread' && previousScroll != null) app.querySelector('.thread-scroll').scrollTop = previousScroll;
   paintUnreadBadges();
   if (cloud) { void refreshUnread(); void acknowledgeDiscussion(); }
-  if (cloud) cloud.loadCovers(state, book => {
-    document.querySelectorAll(`[data-cover-book="${CSS.escape(book.book_id)}"]`).forEach(image => { image.src = book.cover_data; });
-  });
+  if (cloud&&!initialCoverPass) void cloud.loadCovers(state,paintCover);
+  initialCoverPass=false;
   if (previousView && previousView !== view) requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+}
+
+function paintCover(book){
+  const source=book.cover_data;
+  void prepareInitialArtwork([source]).then(()=>{const current=state.books.find(item=>item.book_id===book.book_id);if(current?.cover_data!==source||current.cover_sha256!==book.cover_sha256)return;document.querySelectorAll(`[data-cover-book="${CSS.escape(book.book_id)}"]`).forEach(image=>{if(image.getAttribute('src')!==source)image.src=source;});});
 }
 
 function paintUnreadBadges() {
@@ -405,9 +445,16 @@ document.addEventListener('click', async (event) => {
   if (action === 'note-detail') { const note=findNote(control.dataset.note); if(note) showNoteDetail(note); return; }
   if (action === 'back') { goBack(); return; }
   if (action === 'open-shelf') { menuOpen = false; navigate('shelf', {bookId:null}); render(); return; }
-  if(action==='settings'){openSettings({books:state.books,groups:state.group_records||[],onAI:async()=>{await refreshReadingConfig();applyAppearance();render();}});return;}
+  if(action==='settings'||action==='toggle-menu'){openSettings({navigation:action==='toggle-menu',onNavigate:action=>void navigateFromDrawer(action),books:state.books,groups:state.group_records||[],onAI:async()=>{await refreshReadingConfig();applyAppearance();render();}});return;}
+  if(action==='public-account'){void openAccountSettings();return;}
   if(action==='reader-settings'){openAppearance('reader');return;}
-  if(action==='toggle-group'){const position=app.querySelector('.shelf-books')?.scrollTop||0;toggleGroup(control.dataset.group);render();app.querySelector('.shelf-books').scrollTop=position;return;}
+  if(action==='toggle-group'){
+    const collapsed=toggleGroup(control.dataset.group),section=control.closest('.shelf-section');
+    const isCollapsed=collapsed.has(control.dataset.group);
+    section.querySelector('.book-strip').hidden=isCollapsed;
+    control.setAttribute('aria-expanded',String(!isCollapsed));
+    return;
+  }
   if(action==='ai-settings'){await openAISettings(async()=>{await refreshReadingConfig();render();});return;}
   if (['date-month','date-pick','date-cancel'].includes(action)) {
     const field = control.closest('.date-field'), popup = field.querySelector('.date-popup'), input = field.querySelector('input');
@@ -428,8 +475,13 @@ document.addEventListener('click', async (event) => {
     select.querySelectorAll('[role="option"]').forEach((item) => item.setAttribute('aria-selected', String(item === control)));
     $('.pretty-select-menu', select).hidePopover(); $('.pretty-select-trigger', select).setAttribute('aria-expanded', 'false'); return;
   }
-  if (action === 'toggle-menu') { menuOpen = !menuOpen; render(); return; }
+
   if (action === 'journal-original') { returnToBookTab('original'); return; }
+  if (action === 'jump-read-chapter') {
+    if(journalTab!=='original'){journalTab='original';render();}
+    if(!jumpToReadChapter(app,currentDoc()))toast('还没有已读章节');
+    return;
+  }
   if (action === 'journal-tab') { journalTab = control.dataset.value || 'excerpt'; if (journalTab === 'original') { activeDocumentId = currentBook().current_document_id; chapterIndex = 0; } render(); }
   if (action === 'open-group') { menuOpen = false; navigate('group', { groupName: control.dataset.group || '堆放' }); render(); return; }
   if (action === 'open-book') { if (suppressBookClick) { suppressBookClick = false; return; } const book = state.books.find((item) => item.book_id === control.dataset.book); navigate('journal', { bookId: book.book_id, activeDocumentId: book.current_document_id, chapterIndex: 0, journalTab: 'original' }); render(); return; }
@@ -439,11 +491,13 @@ document.addEventListener('click', async (event) => {
   if (action === 'all-notes') { menuOpen = false; navigate('notes', { filter: 'all' }); render(); }
   if (action === 'filter') { filter = control.dataset.value; render(); }
   if (action === 'add-book') uploadBook();
+  if (action === 'search-books' && cloud) openCatalogWorkflow();
   if (action === 'create-group') createGroup();
   if (action === 'manage-groups') manageGroups();
   if (action === 'reader-profile') { try { await openReaderProfile(); } catch(error) { toast(error.message); } }
   if (action === 'delete-group') { try { await deleteGroup(control.dataset.group); } catch (error) { toast(error.message); } }
   if (action === 'edit-book') editBook();
+  if (action === 'book-options') modal('书籍管理', `<nav class="book-management" aria-label="书籍管理">${btn('编辑资料','edit-book','secondary')}${btn('文件与下载','book-files','secondary')}${btn('新增版本','replace-book','secondary')}</nav>`);
   if (action === 'start-discussion') startDiscussion();
   if (action === 'chapter-settings') editChapters();
   if (action === 'add-chapter-row') addChapterRow();
@@ -482,7 +536,7 @@ document.addEventListener('input', (event) => {
     replyDrafts.set(id, event.target.value);
     replyDraftVersions.set(id, (replyDraftVersions.get(id) || 0) + 1);
   }
-  if (event.target.id === 'shelf-search') { shelfSearch = event.target.value; render(); requestAnimationFrame(() => { const input = $('#shelf-search'); input.focus(); input.setSelectionRange(input.value.length, input.value.length); }); }
+  if (event.target.id === 'shelf-search') { shelfSearch = event.target.value; render(); }
 });
 
 document.addEventListener('change', (event) => {
@@ -559,7 +613,7 @@ document.addEventListener('selectionchange', () => {
 
 $('#sheet-form').addEventListener('submit', async (event) => {
   event.preventDefault();
-  if (!sheet.dataset.mode) return;
+  if (!sheet.dataset.mode || sheet.dataset.avatarBusy === 'true') return;
   await edits.run((input, job) => {
     const { values } = input;
     switch (job.mode) {
@@ -661,6 +715,7 @@ document.addEventListener('submit', async (event) => {
 });
 
 function modal(title, body, mode = '') {
+  profileAvatarEditor?.dispose();profileAvatarEditor=null;delete sheet.dataset.avatarBusy;
   const returnFocus = captureDialogReturnFocus(document);
   sheet.dataset.operationId = crypto.randomUUID();
   $('#sheet-title').textContent = title;
@@ -717,17 +772,17 @@ function customSelect(name, options, selected = '', label = '') {
   return `<div class="pretty-select"><input type="hidden" name="${esc(name)}" value="${esc(current?.value || '')}"><button type="button" class="pretty-select-trigger" popovertarget="${menuId}" popovertargetaction="toggle" ${label ? `aria-label="${esc(label)}"` : ''} aria-haspopup="listbox" aria-expanded="false"><span data-select-label>${esc(current?.label || '')}</span><b aria-hidden="true">›</b></button><div id="${menuId}" class="pretty-select-menu" popover="auto" role="listbox">${options.map((option) => `<button type="button" role="option" data-action="select-option" data-value="${esc(option.value)}" data-label="${esc(option.label)}" aria-selected="${option.value === current?.value}">${esc(option.label)}</button>`).join('')}</div></div>`;
 }
 function documentFileField(id, label) {
-  return `<div class="document-file-field"><span>${esc(label)}</span><label class="document-file-button" for="${esc(id)}"><span data-file-label-for="${esc(id)}">选择文件</span></label><input class="document-file-input" id="${esc(id)}" name="file" type="file" accept="${FORMAT_ACCEPT}" required></div>`;
+  return `<div class="document-file-field">${label?`<span>${esc(label)}</span>`:''}<label class="document-file-button" for="${esc(id)}"><span data-file-label-for="${esc(id)}">选择文件</span></label><input class="document-file-input" id="${esc(id)}" name="file" type="file" accept="${FORMAT_ACCEPT}" required></div>`;
 }
 function groupSelect(selected = '堆放') { return customSelect('category', state.groups.map((group) => ({ value: group, label: group })), selected, '分组'); }
 function closeShelfMenu() { if (menuOpen) { menuOpen = false; render(); } }
 
 function uploadBook() {
   closeShelfMenu();
-  modal('添加一本书', `${documentFileField('new-book-file', '电子文档')}<div class="format-support"><b>可精准摘抄</b><span>TXT · Markdown · DOCX · EPUB · HTML</span><b>先保存原件</b><span>PDF · DOC · MOBI · AZW · AZW3</span></div><label>书名<input name="title" placeholder="默认使用文件名"></label><label>作者<input name="author"></label><div class="field-group"><span>分组</span>${groupSelect()}</div><label>出版社<input name="publisher"></label><p class="field-note">文件最多 25 MB，${cloud ? '保存到云端书库。' : '只保存在此浏览器。'}无加密 DOCX/EPUB 会生成冻结阅读文本；无法可靠解析的格式仍可查看和下载原件。</p>`, 'upload');
+  modal('添加一本书', `<div class="book-source-options">${documentFileField('new-book-file', '电子文档')}${cloud ? '<button type="button" class="secondary catalog-source" data-action="search-books">从开放书库导入</button>' : ''}</div><div class="format-support"><b>可精准摘抄</b><span>TXT · Markdown · DOCX · EPUB · HTML</span><b>先保存原件</b><span>PDF · DOC · MOBI · AZW · AZW3</span></div><label>书名<input name="title" placeholder="默认使用文件名"></label><label>作者<input name="author"></label><div class="field-group"><span>分组</span>${groupSelect()}</div><label>出版社<input name="publisher"></label><p class="field-note">文件最多 25 MB，${cloud ? '保存到云端书库。' : '只保存在此浏览器。'}无加密 DOCX/EPUB 会生成冻结阅读文本；无法可靠解析的格式仍可查看和下载原件。</p>`, 'upload');
 }
 
-function replaceBook() { modal('新增文档版本', `${documentFileField('replacement-book-file', '新的电子书文件')}<p class="field-note">旧文档和旧标注仍保留；新文件生成新的 document_id 和版本。</p>`, 'replace'); }
+function replaceBook() { modal('新增文档版本', `${documentFileField('replacement-book-file', '')}<p class="field-note">旧文档和旧标注仍保留；新文件生成新的 document_id 和版本。</p>`, 'replace'); }
 
 function editBook() {
   const book = currentBook();
@@ -801,24 +856,33 @@ async function saveChapterSettings(job, rows) {
 
 async function openReaderProfile() {
   closeShelfMenu();
-  const session = modal('登录资料', '<p role="status">正在读取登录资料…</p>');
+  const session = modal('个人中心', '<p role="status">正在读取个人资料…</p>');
+  await ensureLibraryDetails();
+  if (!edits.current(session)) return;
   const response=await fetch('/api/reading/profile',{cache:'no-store'});
   if (!edits.current(session)) return;
   if(!response.ok)throw new Error('登录资料暂时无法读取，请重试。');
   const value = await response.json();
   if (!edits.current(session)) return;
   const profile=updateSession(value);
-  modal('登录资料', `<p class="profile-login-state">已登录</p><label>用户名<input name="username" value="${esc(profile.username)}" maxlength="60" autocomplete="nickname" required></label><label>用户 ID<input value="${esc(profile.user_id)}" readonly aria-readonly="true"></label><input type="hidden" name="revision" value="${profile.revision}"><p class="field-note profile-note">AI 会在共读时收到你的用户名和 ID。修改名字后，书库和讨论仍属于同一个 ID。</p>`, 'reader-profile');
+  const editor=modal('个人中心',readerProfileView(profile,{counts:{books:state.books.length,notes:state.annotations.filter(note=>note.purpose!=='discussion').length,threads:state.threads.length},hosted:Boolean(getSession()?.hosted)}),'reader-profile');
+  profileAvatarEditor=bindReaderAvatarEditor(sheet,{profile,isCurrent:()=>edits.current(editor),onTouch:()=>edits.touch(),onError:message=>toast(message),onBusy:busy=>{
+    if(!edits.current(editor))return;
+    sheet.dataset.avatarBusy=String(busy);
+    const submit=$('#sheet-actions [type="submit"]');if(submit)submit.disabled=busy||$('#sheet-form').getAttribute('aria-busy')==='true';
+  }});
 }
 async function saveReaderProfile(values, job) {
-  const response=await fetch('/api/reading/profile',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:values.username.trim(),revision:Number(values.revision)})});
+  const response=await fetch('/api/reading/profile',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:values.username.trim(),revision:Number(values.revision),avatar_data:values.avatar_data})});
   if(!response.ok)throw new Error(response.status===409?'资料已在其他窗口更新，请重新打开后修改。':'资料未保存，请检查用户名并重试。');
   const profile = updateSession(await response.json());
+  document.querySelectorAll('.drawer-identity strong').forEach((name) => { name.textContent = profile.username; });
+  document.querySelectorAll('.drawer-identity [data-reader-avatar]').forEach((avatar) => { avatar.innerHTML=readerAvatarContent(profile); });
   const revision = sheet.dataset.mode === 'reader-profile' && sheet.open ? sheet.querySelector('[name=revision]') : null;
   if (revision && Number(revision.value) === Number(values.revision)) revision.value = profile.revision;
   if (job.current()) {
     // A later draft keeps its text but must use the revision just committed.
-    toast('登录资料已保存');
+    toast('个人资料已保存');
   }
 }
 
@@ -932,7 +996,7 @@ function openThread(threadId) { navigate('thread', {}, threadId); render(); poll
 
 function showBookFiles() {
   const docs = state.documents.filter((doc) => doc.book_id === bookId).sort((a, b) => b.version - a.version);
-  modal('文件与版本', `<div class="file-list">${docs.map((doc) => `<article><div><strong>版本 ${doc.version} · ${formatLabel(doc.format)}</strong><small>${esc(doc.filename || doc.file_name || '未命名')} · ${doc.reading_status === 'ready' ? '可精准摘抄' : '原件模式'} · ${doc.document_id.slice(0, 12)}…</small></div><div>${doc.format === 'pdf' ? btn('查看', 'view-original', 'text-btn', `data-doc="${doc.document_id}"`) : ''}${btn(`${icon('download')} 下载`, 'download-original', 'text-btn', `data-doc="${doc.document_id}"`)}</div></article>`).join('')}</div><p class="field-note">每个版本保留独立 document_id；旧标注继续指向当时的文件。</p>`, '');
+  modal('文件与版本', `<div class="file-list">${docs.map((doc) => `<article><div><strong>版本 ${doc.version} · ${formatLabel(doc.format)}</strong><small>${esc(doc.filename || doc.file_name || '未命名')} · ${doc.reading_status === 'ready' ? '可精准摘抄' : '原件模式'} · ${doc.document_id.slice(0, 12)}…</small></div><div>${doc.format === 'pdf' ? btn('查看', 'view-original', 'text-btn', `data-doc="${doc.document_id}"`) : ''}${btn(icon('download'), 'download-original', 'icon-btn', `data-doc="${doc.document_id}" aria-label="下载版本 ${doc.version} 原件" title="下载原件"`)}</div></article>`).join('')}</div><p class="field-note">每个版本保留独立 document_id；旧标注继续指向当时的文件。</p>`, '');
 }
 
 async function downloadOriginal(documentId) {
@@ -1011,3 +1075,14 @@ function syncDiscussionViewport() {
 window.visualViewport?.addEventListener('resize', syncDiscussionViewport);
 window.visualViewport?.addEventListener('scroll', syncDiscussionViewport);
 window.addEventListener('resize', syncDiscussionViewport);
+
+function openCatalogWorkflow(){
+    if(sheet.open)sheet.close();
+    openBookCatalog({groups:state.group_records||[],onImported:async()=>{
+      libraryWriteGeneration++;
+      const snapshot=await cloud.load({shelfOnly:true});
+      state={...state,books:snapshot.books,groups:snapshot.groups,group_records:snapshot.group_records};
+      cloudDetailsLoaded=false;render();
+    }});
+}
+async function navigateFromDrawer(action){try{await ensureLibraryDetails();if(action==='search-books')openCatalogWorkflow();if(action==='manage-groups')manageGroups();if(action==='reader-profile')await openReaderProfile();if(action==='all-notes'){navigate('notes',{filter:'all'});render();}}catch(error){toast(error.message);}}

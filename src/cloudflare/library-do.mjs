@@ -2,10 +2,12 @@ import { DurableObject } from 'cloudflare:workers';
 import { storeFrozenDocument, readFrozenRange } from './r2-documents.mjs';
 import { identity, text, requireValue, ReadingError, digest } from './validation.mjs';
 import { coverType } from './covers.mjs';
+import { validateAvatarData } from './avatar-validation.mjs';
 import { detectChapterRanges, detectFormat, parseDocumentBytes } from '../core/document-formats.mjs';
 import { DOMParser } from 'linkedom';
 import {normalizeSchedule,nextOccurrence} from '../core/schedule.mjs';
 import {dispatchReadingTurn} from './ai.mjs';
+import {searchBookCatalog,downloadCatalogBook,catalogFailureDiagnostic,CATALOG_LIMITS} from './book-catalog.mjs';
 
 class ReadingMarkupParser extends DOMParser {
   parseFromString(markup, mime) {
@@ -104,6 +106,7 @@ export class ReadingLibraryDO extends DurableObject {
     if (reservation.status === 'ready') return reservation;
     // External R2 I/O deliberately outside SQL transaction. Retry uses same reservation.
     await storeFrozenDocument(this.documentBucket(), { owner_id: owner, book_id: bookId }, { ...reservation, text: source }, input.bytes);
+    if(input.catalogImport)await this.refreshGrant?.(owner);
     return this.ctx.storage.transactionSync(() => {
       const book = this.#get('book', bookId), current = this.#get('document', documentId);
       if (current.status === 'ready') return current;
@@ -153,22 +156,142 @@ export class ReadingLibraryDO extends DurableObject {
 
   #readerProfile(owner) {
     const profile = this.#get('settings', 'profile', false);
-    return { user_id: owner, username: profile?.username || owner, revision: profile?.revision || 0 };
+    const loginId=this.readerLoginId?.(owner);
+    return { user_id: owner, ...(loginId?{login_id:loginId}:{}), username: profile?.username || owner, ...(profile?.avatar_data?{avatar_data:profile.avatar_data}:{}), revision: profile?.revision || 0 };
+  }
+
+  #catalogUsage(){
+    const day=new Date().toISOString().slice(0,10),saved=this.#get('catalog_budget','daily',false),budget=saved?.day===day?saved:{searches:0,imports:0};
+    const counts=action=>({used:budget[action],limit:CATALOG_LIMITS[action],remaining:Math.max(0,CATALOG_LIMITS[action]-budget[action])});
+    return {day,reset_at:new Date(Date.parse(day+'T00:00:00.000Z')+86400000).toISOString(),searches:counts('searches'),imports:counts('imports')};
+  }
+  #catalogAllowance(action){
+    const day=new Date().toISOString().slice(0,10);
+    return this.ctx.storage.transactionSync(()=>{
+      const old=this.#get('catalog_budget','daily',false),budget=old?.day===day?old:{day,searches:0,imports:0};
+      requireValue(budget[action]<CATALOG_LIMITS[action],'catalog_daily_limit',429);
+      this.#put('catalog_budget','daily',{...budget,[action]:budget[action]+1});
+    });
+  }
+
+  #authorizeCatalogTurn(input){
+    const settings=this.#get('settings','ai',false),allowed=settings?settings.public.allow_catalog===true:this.env.MODEL_ALLOW_CATALOG==='true';
+    const turn=this.#get('turn',identity(input.turn_id)),thread=this.#get('thread',turn.thread_id);
+    requireValue(allowed&&turn.status==='dispatching'&&!thread.scheduled,'catalog_model_not_allowed',403);
+  }
+
+  async #searchCatalog(input){
+    requireValue(Object.keys(input).every(k=>['query','language'].includes(k)),'invalid_catalog_input');
+    const query=text(input.query,120).trim(),language=input.language||'';
+    requireValue(query.length>=2&&['','zh','en'].includes(language),'invalid_catalog_input');
+    const cached=this.#get('catalog_cache','latest',false);
+    if(cached?.result.query===query&&cached.result.language===language&&cached.expires>Date.now())return {...cached.result,cached:true};
+    this.#catalogAllowance('searches');
+    const generation=crypto.randomUUID();
+    this.#put('catalog_cache','latest',{generation,expires:0,result:{query,language,items:[]}});
+    const result=await searchBookCatalog({query,language},fetch,this.env.ASSETS);
+    requireValue(this.#get('catalog_cache','latest').generation===generation,'catalog_search_replaced',409);
+    this.#put('catalog_cache','latest',{generation,result,expires:Date.now()+10*60*1000});
+    return result;
+  }
+
+  async #importCatalog(owner,input){
+    requireValue(Object.keys(input).every(k=>['candidate_id','group_id','search_job_id'].includes(k)),'invalid_catalog_input');
+    const id=identity(input.candidate_id),groupId=input.group_id?identity(input.group_id):'';
+    if(groupId)requireValue(!this.#get('group',groupId).archived,'group_unavailable',404);
+    const bookId='catalog_'+id,documentId=bookId+'_doc',old=this.#get('catalog_import',id,false);
+    if(old?.status==='ready')return {...old.result,duplicate:true};
+    const cache=this.#get('catalog_cache','latest',false),job=input.search_job_id?this.#get('catalog_job',identity(input.search_job_id),false):null;
+    const fromJob=job?.type==='search'&&job.status==='succeeded'&&Date.now()-job.updated_at<86400000?job.result.items.find(item=>item.candidate_id===id):null;
+    const candidate=old?.candidate||fromJob||(!input.search_job_id&&cache?.expires>Date.now()?cache.result.items.find(item=>item.candidate_id===id):null);
+    requireValue(candidate,'catalog_search_expired',409);
+    if(old)requireValue(old.group_id===groupId,'idempotency_conflict',409);
+    requireValue(!this.catalogImports?.has(id),'catalog_import_busy',409);
+    this.catalogImports??=new Set();this.catalogImports.add(id);
+    try{
+      this.ctx.storage.transactionSync(()=>{
+        this.#catalogAllowance('imports');
+        if(!old){
+          this.#create('book',bookId,{book_id:bookId,...this.#bookFields({title:candidate.title,author:candidate.author,group_id:groupId}),created_by:'assistant',source_url:candidate.source_url,archived:true,import_document_id:documentId,current_document_id:null,current_version:0});
+          this.#put('catalog_import',id,{candidate,group_id:groupId,status:'uploading'});
+        }
+      });
+      const bytes=await downloadCatalogBook(candidate);
+      await this.refreshGrant?.(owner);
+      const doc=await this.#upload(owner,{book_id:bookId,document_id:documentId,filename:`gutenberg-${candidate.source_id}.txt`,bytes,catalogImport:true});
+      return this.ctx.storage.transactionSync(()=>{
+        const result={book_id:bookId,document_id:doc.document_id,title:candidate.title,source_url:candidate.source_url,format:'txt',created:true};
+        this.#put('catalog_import',id,{candidate,group_id:groupId,status:'ready',result});return result;
+      });
+    }finally{this.catalogImports.delete(id);}
   }
 
   #readerIdentity(owner) {
-    const { user_id, username } = this.#readerProfile(owner);
-    return { user_id, username };
+    const { user_id, login_id, username } = this.#readerProfile(owner);
+    return { user_id, ...(login_id?{login_id}:{}), username };
+  }
+
+  #catalogJobs(){return this.ctx.storage.sql.exec("SELECT value FROM reading_records WHERE kind='catalog_job' ORDER BY json_extract(value,'$.created_at') DESC,id DESC LIMIT 20").toArray().map(row=>JSON.parse(row.value));}
+  async #queueCatalogJob(input){
+    requireValue(input&&['search','import'].includes(input.type)&&Object.keys(input).every(key=>['job_id','type','query','language','candidate_id','group_id','search_job_id'].includes(key)),'invalid_catalog_input');
+    const id=identity(input.job_id),args=input.type==='search'?{query:text(input.query,120).trim(),language:input.language||''}:{candidate_id:identity(input.candidate_id),group_id:input.group_id?identity(input.group_id):'',search_job_id:identity(input.search_job_id)};
+    if(input.type==='search')requireValue(args.query.length>=2&&!/[\u0000-\u001f\u007f]/.test(args.query)&&['','zh','en'].includes(args.language),'invalid_catalog_input');
+    const payload=JSON.stringify({type:input.type,args});
+    const job=this.ctx.storage.transactionSync(()=>{
+      const old=this.#get('catalog_job',id,false);if(old){requireValue(old.payload===payload,'idempotency_conflict',409);return old;}
+      const jobs=this.#catalogJobs();requireValue(jobs.filter(job=>['queued','running'].includes(job.status)).length<3,'catalog_queue_full',429);
+      if(jobs.length>=20){const referenced=new Set([args.search_job_id,...jobs.filter(job=>['queued','running'].includes(job.status)).map(job=>job.args.search_job_id)]);const terminal=[...jobs].reverse().find(job=>!['queued','running'].includes(job.status)&&!referenced.has(job.job_id));requireValue(terminal,'catalog_queue_full',429);this.ctx.storage.sql.exec("DELETE FROM reading_records WHERE kind='catalog_job' AND id=?",terminal.job_id);}
+      return this.#put('catalog_job',id,{job_id:id,type:input.type,args,payload,status:'queued',catalog_reserve:' '.repeat(4096),created_at:Date.now(),updated_at:Date.now()});
+    });
+    await this.#armSchedule();return job;
+  }
+  async #runCatalogJob(owner){
+    if(this.catalogJobRunning)return;
+    const jobs=this.#catalogJobs(),running=jobs.find(job=>job.status==='running');
+    if(running){if(running.lease_until>Date.now())return;const {catalog_reserve,...expired}=running;this.#put('catalog_job',running.job_id,{...expired,status:'failed',error:'catalog_interrupted',updated_at:Date.now()});}
+    const job=[...jobs].reverse().find(job=>job.status==='queued');if(!job)return;
+    this.catalogJobRunning=true;
+    try{
+      this.#put('catalog_job',job.job_id,{...job,catalog_reserve:job.catalog_reserve?.slice(0,3968)||'',status:'running',lease_until:Date.now()+120000,updated_at:Date.now()});
+      await this.#armSchedule();
+      const {catalog_reserve,...terminal}=job;
+      let phase='grant_before',startedAt=Date.now();
+      const stage=value=>{phase=value;startedAt=Date.now();};
+      try{
+        await this.refreshGrant?.(owner);
+        stage(job.type==='search'?'search':'import');
+        const result=job.type==='search'?await this.#searchCatalog(job.args):await this.#importCatalog(owner,job.args);
+        stage('grant_after');
+        await this.refreshGrant?.(owner);
+        stage('persist');
+        this.#put('catalog_job',job.job_id,{...terminal,status:'succeeded',result,updated_at:Date.now()});
+      }catch(error){this.#put('catalog_job',job.job_id,{...terminal,status:'failed',error:error instanceof ReadingError?error.code:'catalog_service_error',diagnostic:catalogFailureDiagnostic(error,{phase,startedAt}),updated_at:Date.now()});}
+    }finally{this.catalogJobRunning=false;await this.#armSchedule();}
   }
 
   async #execute(owner, operation, input) {
+    if(operation==='getCatalogUsage')return this.#catalogUsage();
+    if(operation==='listCatalogJobs'){
+      const items=this.#catalogJobs().map(({payload,catalog_reserve,...job})=>job);
+      if(items.some(job=>['queued','running'].includes(job.status))&&await this.ctx.storage.getAlarm()===null)await this.#armSchedule();
+      return {items,usage:this.#catalogUsage()};
+    }
+    if(operation==='queueCatalogJob')return this.#queueCatalogJob(input);
+    if(operation==='searchCatalog')return this.#searchCatalog(input);
+    if(operation==='importCatalog')return this.#importCatalog(owner,input);
+    if(['modelSearchCatalog','modelImportCatalog'].includes(operation)){
+      this.#authorizeCatalogTurn(input);
+      const {turn_id,...args}=input;
+      return operation==='modelSearchCatalog'?this.#searchCatalog(args):this.#importCatalog(owner,args);
+    }
     if (operation === 'getProfile') return this.#readerProfile(owner);
     if (operation === 'putProfile') return this.ctx.storage.transactionSync(() => {
       const old = this.#readerProfile(owner);
       requireValue(input.revision === old.revision, 'revision_conflict', 409);
       const username = text(input.username, 60).trim();
       requireValue(!/[\u0000-\u001f\u007f]/.test(username), 'invalid_username');
-      this.#put('settings', 'profile', { username, revision: old.revision + 1 });
+      const avatarData=Object.hasOwn(input,'avatar_data')?validateAvatarData(input.avatar_data):old.avatar_data;
+      this.#put('settings', 'profile', { username, ...(avatarData?{avatar_data:avatarData}:{}), revision: old.revision + 1 });
       return this.#readerProfile(owner);
     });
     if(operation==='getSchedule')return this.#scheduleView();
@@ -458,9 +581,15 @@ export class ReadingLibraryDO extends DurableObject {
     return {...publicValue,runs};
   }
   async #armSchedule(config=this.#get('settings','schedule',false)){
-    if(config?.enabled&&config.next_run)await this.ctx.storage.setAlarm(config.next_run);else await this.ctx.storage.deleteAlarm();
+    const jobs=this.#catalogJobs(),running=jobs.find(job=>job.status==='running');
+    const dates=[config?.enabled&&config.next_run,running?.lease_until,!running&&jobs.some(job=>job.status==='queued')?Date.now()+250:null].filter(Boolean);
+    if(dates.length)await this.ctx.storage.setAlarm(Math.max(Date.now()+50,Math.min(...dates)));else await this.ctx.storage.deleteAlarm();
   }
   async alarm(){
+    const owner=this.ctx.storage.sql.exec('SELECT id FROM reading_owner LIMIT 1').toArray()[0]?.id;if(!owner)return;
+    try{await this.#runCatalogJob(owner);await this.#runSchedule();}finally{await this.#armSchedule();}
+  }
+  async #runSchedule(){
     const owner=this.ctx.storage.sql.exec('SELECT id FROM reading_owner LIMIT 1').toArray()[0]?.id;if(!owner)return;
     const config=this.#get('settings','schedule',false);if(!config?.enabled)return;
     const time=Date.now();if(config.next_run>time){await this.#armSchedule(config);return;}
@@ -496,7 +625,7 @@ export class ReadingLibraryDO extends DurableObject {
       if (!stored) this.ctx.storage.sql.exec('INSERT INTO reading_owner(id) VALUES (?)', owner);
       const value = await this.#execute(owner, operation, input);
       // Internal fingerprints are for retry checks, not product API fields.
-      return { ok: true, value: JSON.parse(JSON.stringify(value, (key, val) => ['creation_payload', 'upload_fingerprint'].includes(key) ? undefined : val)) };
+      return { ok: true, value: JSON.parse(JSON.stringify(value, (key, val) => ['creation_payload', 'upload_fingerprint','catalog_reserve'].includes(key) ? undefined : val)) };
     } catch (error) {
       if (error instanceof ReadingError) return { ok: false, status: error.status, error: error.code };
       // Do not echo source text, credentials, SQL, or R2 object keys into responses/logs.

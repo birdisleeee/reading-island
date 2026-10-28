@@ -14,6 +14,7 @@ test('DeepSeek test -> save -> encrypted storage -> real discussion protocol wit
  const {mf,req,calls}=await setup();try{
   assert.equal((await (await req('/api/ai-settings')).json()).configured,false);
   const tested=await (await req('/api/ai-settings/test','POST',input)).json();assert.equal(tested.ok,true,JSON.stringify({result:tested,calls:calls.length}));assert.equal(calls.length,2);assert.equal(calls[0].max_tokens,256);
+  assert.equal((await req('/api/ai-settings','PUT',{...input,allow_catalog:true,proof:tested.proof,revision:0})).status,409,'catalog permission is bound to the tested configuration');
   const save=await req('/api/ai-settings','PUT',{...input,proof:tested.proof,revision:0});assert.equal(save.status,200);const publicValue=await save.json();assert.equal(publicValue.has_key,true);assert.equal(publicValue.api_key,undefined);assert.equal(publicValue.api_url,'https://api.deepseek.com/chat/completions');
   const stub=(await mf.getDurableObjectNamespace('READING_LIBRARY')).getByName('reading-island:v1:owner:alice');
   const stored=await stub.call('alice','getAISettings');assert.ok(stored.value.cipher);assert.equal(JSON.stringify(stored).includes(input.api_key),false);

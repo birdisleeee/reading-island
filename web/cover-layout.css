@@ -1,0 +1,42 @@
+/* Cover geometry belongs to its view, never to the image or title length. */
+.book-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  align-self: start;
+}
+.book-tile > .book-cover {
+  display: block;
+  flex: 0 0 auto;
+  inline-size: 100%;
+  block-size: auto;
+  min-block-size: 0;
+  aspect-ratio: 2 / 3;
+}
+.book-cover > img {
+  position: absolute;
+  inset: 0;
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+}
+.book-facts > .book-cover {
+  inline-size: 112px;
+  min-inline-size: 112px;
+  max-inline-size: 112px;
+  block-size: 168px;
+  min-block-size: 168px;
+  max-block-size: 168px;
+  align-self: center;
+}
+@media (max-width: 380px) {
+  .book-facts > .book-cover {
+    inline-size: 108px;
+    min-inline-size: 108px;
+    max-inline-size: 108px;
+    block-size: 162px;
+    min-block-size: 162px;
+    max-block-size: 162px;
+  }
+}

@@ -3,6 +3,7 @@ import { principalFor, sameSecret, issueToken } from '../core/auth.mjs';
 import { readJson, ReadingError } from './validation.mjs';
 import {handleAISettings,publicAISettings} from './ai-settings.mjs';
 import {handleSchedule} from './schedule-api.mjs';
+import {handleBookCatalog} from './book-catalog.mjs';
 export { ReadingLibraryDO } from './library-do.mjs';
 const json=(value,status=200,headers={})=>Response.json(value,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...headers}});
 export default {
@@ -15,6 +16,7 @@ export default {
       }
       if(path==='/api/ai-settings'||path==='/api/ai-settings/test')return handleAISettings(request,env,await principalFor(request,env));
       if(path==='/api/topic-schedule')return handleSchedule(request,env,await principalFor(request,env));
+      if(path.startsWith('/api/book-catalog/'))return handleBookCatalog(request,env,await principalFor(request,env));
       if(path==='/api/session') {
         if(request.method==='GET'){
           const principal=await principalFor(request,env);

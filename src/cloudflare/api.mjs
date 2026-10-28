@@ -21,7 +21,7 @@ export async function handleReadingApi(request, env, principal) {
       requireValue(principal.role === 'reader', 'forbidden', 403);
       requireValue(['GET', 'PATCH'].includes(request.method), 'method_not_allowed', 405);
       const body = request.method === 'PATCH' ? await readJson(request) : {};
-      const result = await stub.call(owner, request.method === 'PATCH' ? 'putProfile' : 'getProfile', { username: body.username, revision: body.revision });
+      const result = await stub.call(owner, request.method === 'PATCH' ? 'putProfile' : 'getProfile', { username: body.username, revision: body.revision, ...(Object.hasOwn(body,'avatar_data')?{avatar_data:body.avatar_data}:{}) });
       return result.ok ? reply(result.value) : reply({error: result.error}, result.status);
     }
     if (resource === 'unread' && segments.length === 1 && request.method === 'GET') {

@@ -58,7 +58,9 @@ export async function dispatchReadingTurn(env,stub,turnId,owner,origin,fetchImpl
       const history=await stub.call(owner,'modelHistory',{turn_id:turnId});
       const thread=await stub.call(owner,'get',{kind:'thread',id:payload.thread_id});
       const uploadAllowed=(env.MODEL_ALLOW_UPLOAD===true||env.MODEL_ALLOW_UPLOAD==='true')&&thread.ok&&!thread.value.scheduled;
-      text=await runModel({env,payload,history:history.ok?history.value:[],fetchImpl:modelFetch,...(uploadAllowed?{addBook:async args=>{const result=await stub.call(owner,'modelAddBook',{...args,turn_id:turnId});if(!result.ok)throw new Error('Book upload rejected');return result.value;}}:{}),readSource:async(start,limit)=>{
+      const catalogAllowed=(env.MODEL_ALLOW_CATALOG===true||env.MODEL_ALLOW_CATALOG==='true')&&thread.ok&&!thread.value.scheduled;
+      const catalogCall=operation=>async args=>{const result=await stub.call(owner,operation,{...args,turn_id:turnId});if(!result.ok)throw new ReadingError(result.status,result.error);return result.value;};
+      text=await runModel({env,payload,history:history.ok?history.value:[],fetchImpl:modelFetch,...(catalogAllowed?{searchBooks:catalogCall('modelSearchCatalog'),importBook:catalogCall('modelImportCatalog')}:{}),...(uploadAllowed?{addBook:async args=>{const result=await stub.call(owner,'modelAddBook',{...args,turn_id:turnId});if(!result.ok)throw new Error('Book upload rejected');return result.value;}}:{}),readSource:async(start,limit)=>{
         const result=await stub.call(owner,'gatewaySource',sourceInput(payload,start,limit));
         if(!result.ok)throw new Error('Source unavailable');return result.value;
       }});

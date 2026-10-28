@@ -1,0 +1,30 @@
+.reader-controls-enabled{position:relative;outline:none}
+.reader-controls-enabled:focus-visible{outline:2px solid var(--theme-accent,#86613f);outline-offset:-3px}
+.reader-controls-top,.reader-controls-bottom{position:fixed;left:var(--reader-controls-left,0px);width:var(--reader-controls-width,100%);z-index:12;color:var(--ink,#453321);background:var(--theme-surface,#f7edda);box-sizing:border-box}
+.reader-controls-top[hidden],.reader-controls-bottom[hidden]{display:none!important}
+.reader-controls-bottom>.reader-quick-layout[hidden],.reader-controls-bottom>.reader-controls-feedback[hidden]{display:none!important}
+.reader-chapter-end{display:block!important;width:1px;height:0;margin:0;padding:0;line-height:0;pointer-events:none}
+.reader-controls-top{top:var(--reader-controls-top,0px);box-shadow:0 4px 16px #45332112;padding-top:env(safe-area-inset-top,0px)}
+.reader-controls-portal .reader-controls-top .reader-head{position:static;top:auto;min-height:56px;height:auto;padding-block:8px}
+.reader-controls-portal .reader-controls-top .reader-tools{padding-block:4px;min-height:36px;flex-wrap:wrap;font-size:10px}
+.reader-controls-top .scope-pill{display:none}
+.reader-controls-dismiss{margin-left:auto;padding:4px 12px;min-width:44px;min-height:36px;border:0;background:transparent;color:var(--muted,#827668);font-size:12px}
+.reader-controls-bottom{bottom:var(--reader-controls-bottom,0px);padding:12px 18px calc(10px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--line,#86613f33);box-shadow:0 -4px 16px #45332112}
+.reader-quick-layout{display:grid;grid-template-columns:minmax(100px,1fr) minmax(170px,1.5fr);align-items:end;gap:18px;max-width:670px;margin:0 auto}
+.reader-quick-layout label{font-size:11px;color:var(--muted,#827668);margin:0;display:block}
+.reader-quick-font select{display:block;width:100%;min-height:42px;padding:7px 9px;margin-top:3px;border:1px solid var(--line,#86613f33);border-radius:9px;font-family:inherit;font-size:14px;line-height:1.3;color:var(--input-ink,var(--ink));background:var(--inner-fill,#fbf5e9)}
+.reader-quick-size output{color:var(--ink);font-variant-numeric:tabular-nums;margin-left:5px}
+.reader-quick-size>div{display:flex;align-items:center;gap:5px;min-height:42px;margin-top:3px}
+.reader-quick-size button{flex:0 0 40px;min-height:42px;border:0;border-radius:8px;background:transparent;font-size:14px;color:var(--ink);padding:4px}
+.reader-quick-size input{min-width:0;width:100%;min-height:42px;margin:0;accent-color:var(--theme-accent,#86613f);background:transparent}
+.reader-controls-feedback{max-width:670px;min-height:20px;margin:4px auto 0;display:flex;gap:10px;align-items:center;font-size:10px;color:var(--muted,#827668)}
+.reader-controls-feedback button{border:0;background:transparent;color:var(--theme-accent,#86613f);font-size:11px;min-height:30px;padding:0 5px;text-decoration:underline}
+.reader-controls-portal .reader-controls-bottom .chapter-turner{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:4px auto 0;padding:0;max-width:670px;border:0;background:transparent}
+.reader-controls-bottom .chapter-turner button{min-height:42px;flex:1;border:1px solid var(--line,#86613f33);border-radius:999px;padding:6px 8px;background:var(--inner-fill,#fbf5e9);color:var(--ink);font-size:12px}
+.reader-controls-portal button:disabled{opacity:.4;cursor:default}
+.reader-controls-enabled .chapter-reading{min-height:100%;padding-top:24px}
+.reader-controls-enabled #reader-text{padding-bottom:180px}
+.reader-controls-portal :is(button,select,input):focus-visible{outline:2px solid var(--theme-accent,#86613f);outline-offset:2px}
+@media(min-width:641px){.reader-controls-bottom{padding-inline:28px}.reader-controls-enabled .chapter-reading{padding-top:30px}}
+@media(max-width:360px){.reader-controls-bottom{padding-inline:12px}.reader-quick-layout{gap:8px;grid-template-columns:minmax(96px,1fr) minmax(156px,1.4fr)}.reader-quick-size button{flex-basis:34px}}
+@media(prefers-reduced-motion:reduce){.reader-controls-enabled,.reader-controls-enabled *{scroll-behavior:auto!important}}

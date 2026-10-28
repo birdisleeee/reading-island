@@ -17,7 +17,7 @@ const token = await issueToken(sessionSecret, {
 
 宿主在共读所在 origin 设置 `reading_session` Cookie，属性为 `Path=/; HttpOnly; Secure; SameSite=Strict`，并根据实际会话时长设置 Max-Age。iframe 依靠同源 Cookie 登录。服务端 API 客户端也可用 `Authorization: Bearer <signed-session-token>`；不要把令牌放在 URL 或 iframe 查询参数中。
 
-不同签名 `user_id` 对应不同 DO/R2 数据空间。参考后端不提供注册、用户管理和租户控制台，这些由宿主负责。
+不同签名 `user_id` 对应不同 DO/R2 数据空间。默认单人参考后端不提供注册、用户管理和租户控制台，这些由宿主负责。另有带注册申请、人工审批和配额的独立 [公共服务适配器](../public-service/README.md)，不与默认部署配置混用。
 
 `GET /api/session` 返回当前已验证的 `user_id`、`username` 和资料 revision。读者可通过 `GET/PATCH /api/reading/profile` 查看或更新自己的用户名；宿主也可在可信服务端使用该用户的签名会话初始化用户名。用户 ID 始终取自鉴权，不接受浏览器正文改写。独立密码登录仍对应一个固定用户（默认 reader），不是输入不同名字就注册多个账号。电脑左下角显示登录资料，原返回宿主的跳转仍由页面返回行为和 returnUrl 配置控制。
 

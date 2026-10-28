@@ -1,6 +1,7 @@
 import reading from '../src/cloudflare/entry.mjs';
 import {issueToken} from '../src/core/auth.mjs';
 import {json,bad,checkOrigin,digest,harden,limitedBody} from './security.js';
+import {renderPublicShell} from './client-shell.mjs';
 export {Registry} from './registry.js';
 export {HostedReadingLibraryDO} from './library.mjs';
 const serviceRoutes=new Map([
@@ -17,6 +18,12 @@ export default {async fetch(request,env,ctx){
   const registry=env.REGISTRY.getByName('reading-public:v1');
   const headers=new Headers({'X-Service-Key':env.INTERNAL_KEY,'X-Ip-Hash':await digest(env.INTERNAL_KEY+ip),'Cookie':request.headers.get('Cookie')||''});
   const registryCall=(path,method='GET',body)=>registry.fetch(new Request('https://registry'+path,{method,headers,body}));
+  if(path==='/download/android-update.json'){
+   if(!['GET','HEAD'].includes(request.method))bad('method not allowed',405);
+   const metadata=await env.ASSETS.fetch(new Request(new URL('/download/android-update.json',url)));
+   if(!metadata.ok)return harden(json({error:'updates_unavailable'},503));
+   return harden(new Response(request.method==='HEAD'?null:metadata.body,{headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}}));
+  }
   if(serviceRoutes.has(path)){
    if(request.method!==serviceRoutes.get(path))bad('method not allowed',405);
    if(!path.includes('/owner/')&&!['/service/api/owner-login','/service/api/me','/service/api/logout'].includes(path)){const admit=await registryCall('/internal/admit');if(!admit.ok)return harden(admit);}
@@ -30,7 +37,11 @@ export default {async fetch(request,env,ctx){
    if(!apk.ok)bad('APK 正在准备中，请先使用网页版',404);
    return new Response(request.method==='HEAD'?null:apk.body,{headers:{'Content-Type':'application/vnd.android.package-archive','Content-Disposition':'attachment; filename="reading-island.apk"','Cache-Control':'public, max-age=600','X-Content-Type-Options':'nosniff'}});
   }
-  if(path==='/'||path==='/app'||path==='/owner')return harden(await env.ASSETS.fetch(new Request(new URL('/service/index.html',url))));
+  if(path==='/'||path==='/app'||path==='/owner'){
+   const shell=await env.ASSETS.fetch(new Request(new URL('/service/index.html',url)));
+   if(!shell.ok)return harden(shell);
+   return harden(new Response(request.method==='HEAD'?null:renderPublicShell(await shell.text(),request.headers.get('User-Agent')||''),{status:shell.status,headers:{'Content-Type':'text/html; charset=utf-8','Vary':'User-Agent'}}));
+  }
   if(path.startsWith('/api/')||path==='/reading-island/'||path==='/reading-island/index.html'){
    if(path.startsWith('/api/reading/gateway/')||(path==='/api/session'&&request.method==='POST'))bad('not found',404);
    if(path==='/api/session'&&request.method==='DELETE')return harden(await registryCall('/service/api/logout','POST',new Uint8Array()));
@@ -40,8 +51,10 @@ export default {async fetch(request,env,ctx){
    const {user}=await access.json();
    if(path==='/api/session'&&request.method==='GET'){
     const stub=env.READING_LIBRARY.getByName('reading-island:v1:owner:'+user.id);
-    const current=await stub.call(user.id,'getProfile');
-    if(current.ok&&!current.value.revision)await stub.call(user.id,'putProfile',{revision:0,username:user.name});
+    let profile=await stub.call(user.id,'getProfile');
+    if(profile.ok&&!profile.value.revision)profile=await stub.call(user.id,'putProfile',{revision:0,username:user.name});
+    if(!profile.ok)return harden(json({error:profile.error},profile.status));
+    return harden(json({...profile.value,role:'reader',login_id:user.username,hosted:true}));
    }
    if(path==='/api/public-usage'){
     const result=await env.READING_LIBRARY.getByName('reading-island:v1:owner:'+user.id).call(user.id,'hostedUsage');

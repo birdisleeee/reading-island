@@ -5,6 +5,36 @@ import {initialPolicy,suggestedQuota} from '../public-service/quota.mjs';
 
 const bindings={INTERNAL_KEY:'fixture-internal-not-production',OWNER_KEY:'fixture-owner-not-production',SESSION_SECRET:'fixture-session-not-production',PUBLIC_SERVICE:'true',AI_MODE:'mock'};
 export const options={modules:true,scriptPath:'dist/public-worker.mjs',compatibilityDate:'2026-07-30',compatibilityFlags:['nodejs_compat'],durableObjects:{REGISTRY:{className:'Registry',useSQLite:true},READING_LIBRARY:{className:'HostedReadingLibraryDO',useSQLite:true}},bindings};
+test('a queued background task can record failure and stop after its storage allowance is lowered',async()=>{
+ let network=0;const mf=new Miniflare({...options,outboundService:async()=>{network++;return new FixtureResponse('unavailable',{status:503});}});
+ try{
+  const {req,cookie,owner,user}=await approvedFixture(mf,suggestedQuota);
+  const queued=await req('/api/book-catalog/jobs',{job_id:'quota_lowered',type:'search',query:'original'},cookie);assert.equal(queued.status,200);
+  const review=await req('/service/api/owner/review',{id:user.id,expectedRevision:1,status:'active',quota:{...suggestedQuota,bytes:512},note:''},owner);assert.equal(review.status,200);
+  let job;
+  for(let attempt=0;attempt<50;attempt++){const response=await req('/api/book-catalog/jobs',null,cookie);assert.equal(response.status,200);job=(await response.json()).items[0];if(job.status==='failed')break;await new Promise(resolve=>setTimeout(resolve,100));}
+  assert.equal(job.status,'failed');assert.equal(job.error,'storage_quota_exceeded');assert.equal(network,0,'no download or search starts after refreshed storage is exhausted');
+ }finally{await mf.dispose();}
+});
+test('registration accepts a short password and optional notification email without an application purpose',async()=>{
+ const mf=new Miniflare(options),origin='https://reading.test';
+ let sequence=0;
+ const req=(path,body,cookie='')=>mf.dispatchFetch(origin+path,{method:body?'POST':'GET',headers:{Origin:origin,Cookie:cookie,'Content-Type':'application/json','CF-Connecting-IP':'registration-fixture-'+sequence++},...(body?{body:JSON.stringify(body)}:{})});
+ try{
+  const owner=(await req('/service/api/owner-login',{key:bindings.OWNER_KEY})).headers.get('set-cookie').split(';')[0];
+  assert.equal((await req('/service/api/owner/policy',initialPolicy,owner)).status,200);
+  const payload={username:'shortpass',password:'a',name:'原创读者'};
+  for(const patch of [{password:''},{password:'a'.repeat(129)},{email:'not-an-email'},{email:123}])assert.equal((await req('/service/api/register',{...payload,...patch})).status,400);
+  let r=await req('/service/api/register',payload);assert.equal(r.status,201,await r.clone().text());
+  const user=(await r.json()).user;assert.equal(user.status,'pending');assert.equal(user.quota.books,0);
+  r=await req('/service/api/login',{username:payload.username,password:'a'});assert.equal(r.status,200);
+  assert.equal((await req('/api/session',null,r.headers.get('set-cookie').split(';')[0])).status,403,'short passwords do not bypass approval');
+  r=await req('/service/api/register',{...payload,username:'mailreader',email:' notice@example.test ',reason:'ignored legacy field'});assert.equal(r.status,201);
+  const list=await(await req('/service/api/owner/list',null,owner)).json();
+  assert.equal(list.users.find(u=>u.username==='mailreader').email,'notice@example.test');
+  const noEmail=list.users.find(u=>u.username==='shortpass');assert.equal(noEmail.email,'');assert.equal(noEmail.reason,undefined);
+ }finally{await mf.dispose();}
+});
 test('public applications, manual approval, hard capacity, tenant isolation and all quotas are enforced',async()=>{
  const mf=new Miniflare(options);const origin='https://reading.test';
  const request=(path,body,cookie='',method=body?'POST':'GET')=>mf.dispatchFetch(origin+path,{method,headers:{Origin:origin,Cookie:cookie,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});
@@ -40,7 +70,7 @@ test('public applications, manual approval, hard capacity, tenant isolation and 
   const usage=await request('/api/public-usage',null,alice.cookie);assert.equal(usage.status,200);assert.ok((await usage.json()).value.bytes<=tiny.bytes);
   const registry=await mf.getDurableObjectNamespace('REGISTRY');
   const internal=route=>registry.get(registry.idFromName('reading-public:v1')).fetch('https://registry/internal/'+route+'?id='+alice.id,{headers:{'X-Service-Key':bindings.INTERNAL_KEY}});
-  assert.equal((await internal('ai-attempt')).status,200);assert.equal((await internal('ai-attempt')).status,200);assert.equal((await internal('ai-attempt')).status,429);
+  assert.equal((await internal('ai-attempt')).status,200);assert.equal((await internal('ai-attempt')).status,200);assert.equal((await internal('ai-attempt')).status,200,'retired AI lifetime quota is ignored');
   r=await request('/service/api/quota-request',{reason:'原创扩容测试',quota:{...tiny,books:2}},alice.cookie);assert.equal(r.status,200);
   assert.equal((await request('/service/api/quota-request',{reason:'重复申请',quota:tiny},alice.cookie)).status,409);
   assert.equal((await create('book_two')).status,429,'quota request is not approval');
@@ -53,7 +83,7 @@ test('public applications, manual approval, hard capacity, tenant isolation and 
   assert.equal((await request('/service/api/logout',{},bob.cookie)).status,200);
   assert.equal((await request('/api/session',null,bob.cookie)).status,401);
   r=await request('/service/api/login',{username:'bobby',password:'fixture-password-123'});assert.equal(r.status,200);
-  assert.equal((await request('/api/session',null,cookie(r))).status,200);
+  const signedIn=await request('/api/session',null,cookie(r));assert.equal(signedIn.status,200);const profile=await signedIn.json();assert.equal(profile.login_id,'bobby');assert.equal(profile.hosted,true);assert.equal(profile.user_id,bob.id);const publicProfile=await(await request('/api/reading/profile',null,cookie(r))).json();assert.equal(publicProfile.login_id,'bobby');
   r=await mf.dispatchFetch(origin+'/service/api/login',{method:'POST',headers:{Origin:'https://other.test'},body:'{}'});assert.equal(r.status,403);
  }finally{await mf.dispose();}
 });
@@ -68,7 +98,7 @@ async function approvedFixture(mf,q){
  return {req,cookie,owner,user};
 }
 
-test('each real provider attempt including probe tool continuation is charged before outbound I/O',async()=>{
+test('provider probes and tool continuations use daily service limits, not a lifetime AI allowance',async()=>{
  let attempts=0;
  const mf=new Miniflare({...options,outboundService:async request=>{
   attempts++;assert.equal(request.headers.get('authorization'),'Bearer fixture-user-model-key');
@@ -76,19 +106,17 @@ test('each real provider attempt including probe tool continuation is charged be
   return FixtureResponse.json({choices:[{message:!body.tools?.length||body.messages.at(-1).role==='tool'?{role:'assistant',content:'原创测试内容。'}:{role:'assistant',content:null,tool_calls:[{id:'fixture_source',type:'function',function:{name:'read_source',arguments:'{"start":0,"limit":100}'}}]}}]});
  }});
  try{
-  const {req,cookie,owner}=await approvedFixture(mf,{...suggestedQuota,aiCalls:2});
+  const {req,cookie,owner}=await approvedFixture(mf,{...suggestedQuota,aiCalls:0,requestsPerDay:4});
   const settings={provider:'deepseek',api_key:'fixture-user-model-key',model:'fixture-model',name:'原创伙伴'};
   let r=await req('/api/ai-settings/test',settings,cookie);assert.equal(r.status,200,await r.clone().text());assert.equal(attempts,2);
   const text=await r.text();assert.ok(!text.includes(settings.api_key));
   assert.equal((await req('/api/ai-settings',{...settings,proof:JSON.parse(text).proof,revision:0},cookie,'PUT')).status,200);
   r=await req('/api/ai-settings/test',settings,cookie);assert.equal(r.status,429);assert.equal(attempts,2,'quota rejection must not contact provider');
-  assert.match((await r.json()).message,/额度/);
   const me=await(await req('/service/api/me',null,cookie)).json();assert.equal(me.usage.aiCalls,2);
-  assert.equal((await req('/api/reading/books',{book_id:'quota_book',title:'原创'},cookie)).status,200);
-  r=await req('/api/reading/threads',{book_id:'quota_book',thread_id:'quota_thread',title:'原创议题',opening:'你好',opening_message_id:'quota_message',turn_id:'quota_turn',delivery_id:'quota_delivery'},cookie);
-  assert.equal(r.status,200);assert.equal((await r.json()).delivery_status,'unavailable');assert.equal(attempts,2);
-  assert.equal((await req('/service/api/owner/review',{id:me.user.id,expectedRevision:me.user.revision,status:'active',quota:{...suggestedQuota,aiCalls:4},note:'额度扩容'},owner)).status,200);
-  r=await req('/api/reading/threads/quota_thread/retry',{turn_id:'quota_turn'},cookie);assert.equal((await r.json()).dispatch.status,'completed');assert.equal(attempts,3);
+  assert.equal(me.usage.requests,4);
+  assert.equal((await req('/service/api/owner/review',{id:me.user.id,expectedRevision:me.user.revision,status:'active',quota:{...suggestedQuota,requestsPerDay:10},note:'每日服务额度调整'},owner)).status,200);
+  r=await req('/api/ai-settings/test',settings,cookie);assert.equal(r.status,200);assert.equal(attempts,4);
+
  }finally{await mf.dispose();}
 });
 

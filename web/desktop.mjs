@@ -1,6 +1,8 @@
 import {cropImage} from './image-cropper.mjs';
+import {readerAvatarContent} from './reader-avatar-view.mjs';
 import { getSession } from './session.mjs';
 import {createEditSessions} from './edit-session.mjs';
+import {sameArtworkBlob} from './artwork-blob.mjs';
 // Desktop presentation and device-local artwork only. Book data continues through
 // the existing reading API; this module never writes books, notes or discussions.
 const desktop = matchMedia('(min-width:641px)');
@@ -30,10 +32,13 @@ async function loadAppearance(){
     const tx=db.transaction('configs');
     const art=await request(tx.objectStore('configs').get('desktop-reading-hero'));
     if(run!==generation||!desktop.matches||version!==artVersion)return;
-    artwork=art?.blob?{blob:art.blob,source:art.source||art.blob,crop:art.crop}:null;artSize=art?.size||100;
-    const next=art?.blob instanceof Blob?URL.createObjectURL(art.blob):'';
-    if(imageUrl)URL.revokeObjectURL(imageUrl);imageUrl=next;
+    const nextArtwork=art?.blob instanceof Blob?{blob:art.blob,source:art.source||art.blob,crop:art.crop}:null;
+    const same=await sameArtworkBlob(artwork?.blob,nextArtwork?.blob);
+    if(run!==generation||!desktop.matches||version!==artVersion)return;
+    const next=same?imageUrl:nextArtwork?URL.createObjectURL(nextArtwork.blob):'',obsolete=imageUrl;
+    artwork=nextArtwork;artSize=art?.size||100;imageUrl=next;
     schedule();
+    if(obsolete&&obsolete!==imageUrl)URL.revokeObjectURL(obsolete);
   }catch{/* Existing artwork remains available if local appearance storage is unavailable. */}
   finally{db?.close();}
 }
@@ -65,9 +70,10 @@ function refresh(){
   const identity=getSession(),account=rail.querySelector('[data-action="reader-profile"]');
   account.hidden=!identity;
   if(identity){
+    const avatar=account.querySelector('.reader-avatar'),avatarSignature=JSON.stringify([identity.avatar_data||'',identity.username]);if(avatar.dataset.avatar!==avatarSignature){avatar.innerHTML=readerAvatarContent(identity);avatar.dataset.avatar=avatarSignature;}
     account.querySelector('[data-reader-name]').textContent=identity.username||identity.user_id;
-    account.querySelector('[data-reader-id]').textContent='ID · '+identity.user_id;
-    account.setAttribute('aria-label',`已登录：${identity.username||identity.user_id}，ID ${identity.user_id}，编辑登录资料`);
+    account.querySelector('[data-reader-id]').textContent='ID · '+(identity.login_id||identity.user_id);
+    account.setAttribute('aria-label',`已登录：${identity.username||identity.user_id}，ID ${identity.login_id||identity.user_id}，编辑登录资料`);
   }
   const image=app.querySelector('.library-hero img');
   if(image){
@@ -113,7 +119,7 @@ function ensureDesktop(){
     app.addEventListener('click',event=>{if(desktop.matches&&event.target.matches('.library-hero img'))openReplace();});
     app.addEventListener('keydown',event=>{if(desktop.matches&&event.target.matches('.library-hero img')&&['Enter',' '].includes(event.key)){event.preventDefault();openReplace();}});
   }
-  void loadAppearance();schedule();
+  const loading=loadAppearance();schedule();return loading;
 }
 function openReplace(){artVersion++;artEdits.begin({});dialog.querySelector('[data-art=adjust]').disabled=!artwork;const input=dialog.querySelector('input');input.value=artSize;dialog.querySelector('output').textContent=artSize+'%';input.oninput=()=>{artVersion++;artEdits.touch();artSize=Number(input.value);dialog.querySelector('output').textContent=artSize+'%';schedule();};if(!dialog.open)dialog.showModal();}
 async function editArtwork(source,initial){const version=artVersion,asset=await cropImage(source,{title:'调整共读岛插图',aspect:310/180,initial});if(!asset||!desktop.matches||version!==artVersion)return;await saveArtwork(asset,artSize);notice('插图已替换');}
@@ -131,4 +137,7 @@ async function saveArtwork(asset,size){
 desktop.addEventListener('change',ensureDesktop);
 window.addEventListener('focus',()=>{if(desktop.matches)void loadAppearance();});
 window.addEventListener('pageshow',()=>{if(desktop.matches)void loadAppearance();});
-ensureDesktop();
+export const getDesktopArtworkUrl=()=>desktop.matches?imageUrl:'';
+// The host combines this local read with its bounded startup image preparation.
+// Focus/pageshow reads remain independent and do not replace this first-load promise.
+export const initialDesktopArtwork=Promise.resolve(ensureDesktop()).then(getDesktopArtworkUrl,getDesktopArtworkUrl);

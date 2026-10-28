@@ -1,0 +1,12 @@
+.startup-center{min-height:70dvh;display:grid;place-items:center;padding:40px 24px;background:var(--theme-surface,#f7edda);color:var(--ink,#453321)}
+.startup-identity{display:flex;flex-direction:column;align-items:center;gap:10px;width:min(100%,340px);padding:28px 22px;border:1px solid var(--line,#dacfbd);border-radius:22px;text-align:center;background:var(--theme-surface,#f7edda)}
+.startup-avatar{display:grid;place-items:center;width:72px;height:72px;overflow:hidden;border-radius:50%;background:#e8d8bc;color:var(--ink,#453321);font:28px/1 system-ui}
+.startup-avatar svg{width:44px;height:44px}.startup-avatar img{width:100%;height:100%;object-fit:cover}
+.startup-identity h1{margin:4px 0 0;font:500 21px/1.5 system-ui,"Microsoft YaHei",sans-serif;overflow-wrap:anywhere}
+.startup-identity p{margin:0;font:12px/1.7 system-ui,"Microsoft YaHei",sans-serif}.startup-id{color:var(--muted,#827668)}
+.startup-status{color:var(--muted,#827668);padding-top:12px}.startup-status::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;background:currentColor;margin-right:7px;vertical-align:middle}
+body[data-reading-starting]>.reading-desktop-rail,body[data-reading-starting]>.interface-wallpaper--root{visibility:hidden}
+body[data-reading-starting] #app{margin:auto;max-width:680px;background:transparent;box-shadow:none}
+body:has(#account>.startup-center) :is(.intro,main>footer){display:none}
+#account:has(>.startup-center){max-width:520px;margin:8dvh auto 0;padding:0;background:transparent;box-shadow:none}
+#account>.startup-center{min-height:50dvh;background:transparent}
